@@ -13,45 +13,69 @@ import base64
 # Configuración visual de la app móvil
 st.set_page_config(page_title="Mi Libreta Inteligente", page_icon="📝", layout="centered")
 
-# --- COMPONENTE DE CÁMARA ULTRA RÁPIDA (JAVASCRIPT) ---
+# --- COMPONENTE DE CÁMARA ULTRA RÁPIDA OPTIMIZADA ---
 def camara_ultra_rapida_js():
     html_code = """
-    <div style="text-align: center;">
-        <video id="webcam" autoplay playsinline width="100%" style="border-radius: 10px; max-width: 500px; background-color: #000;"></video>
-        <br><br>
+    <div style="text-align: center; font-family: sans-serif;">
         <button id="snap" style="
             background-color: #FF4B4B; color: white; border: none; 
-            padding: 14px 28px; font-size: 16px; border-radius: 8px; 
-            cursor: pointer; font-weight: bold; width: 85%; max-width: 300px;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.2);
-        ">📷 Capturar Hoja al Instante</button>
+            padding: 16px 30px; font-size: 18px; border-radius: 50px; 
+            cursor: pointer; font-weight: bold; width: 90%; max-width: 340px;
+            box-shadow: 0px 4px 10px rgba(255, 75, 75, 0.4);
+            margin-bottom: 15px;
+        ">📸 CAPTURAR HOJA AHORA</button>
+        
+        <div style="position: relative; width: 100%; max-width: 500px; margin: 0 auto;">
+            <video id="webcam" autoplay playsinline muted width="100%" style="
+                border-radius: 12px; 
+                background-color: #111;
+                box-shadow: 0px 4px 12px rgba(0,0,0,0.15);
+            "></video>
+        </div>
         <canvas id="canvas" style="display:none;"></canvas>
     </div>
+    
     <script>
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('canvas');
         const snap = document.getElementById('snap');
         const ctx = canvas.getContext('2d');
 
-        // Acceder a la cámara trasera directamente en Full HD de manera local
-        navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, 
-            audio: false 
-        })
-        .then(stream => { video.srcObject = stream; })
-        .catch(err => { alert("No se pudo acceder a la cámara trasera. Asegúrate de dar los permisos."); });
+        // Configuración reforzada para asegurar que abra la cámara trasera en móviles
+        const constraints = {
+            video: { 
+                facingMode: { ideal: "environment" }, 
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 } 
+            },
+            audio: false
+        };
 
-        // Captura inmediata al pulsar el botón
+        navigator.mediaDevices.getUserMedia(constraints)
+        .then(stream => { 
+            video.srcObject = stream;
+            video.setAttribute("playsinline", true); // Vital para iOS Safari
+            video.play();
+        })
+        .catch(err => { 
+            alert("Error de cámara: Asegúrate de otorgar permisos de cámara y usar HTTPS."); 
+        });
+
+        // Captura inmediata al pulsar el botón de arriba
         snap.addEventListener('click', () => {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
-            Streamlit.setComponentValue(dataUrl);
+            if(video.videoWidth > 0) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                Streamlit.setComponentValue(dataUrl);
+            } else {
+                alert("La cámara aún está cargando. Intenta de nuevo en un segundo.");
+            }
         });
     </script>
     """
-    return components.html(html_code, height=480)
+    return components.html(html_code, height=540)
 
 # --- CONEXIÓN A DRIVE ---
 def conectar_drive():
@@ -64,7 +88,6 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
         creds = service_account.Credentials.from_service_account_info(creadenciales_dict)
         service = build('drive', 'v3', credentials=creds)
         
-        # Preparar el archivo desde memoria RAM
         media = MediaIoBaseUpload(io.BytesIO(bytes_image), mimetype='image/jpeg', resumable=True)
         
         file_metadata = {
@@ -72,12 +95,11 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
             'parents': [folder_id]
         }
         
-        # Sube vinculando la propiedad del almacenamiento al dueño de la carpeta destino
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id',
-            supportsAllDrives=True  # Soluciona la cuota de las cuentas de servicio
+            supportsAllDrives=True
         ).execute()
         
         return file.get('id')
@@ -86,7 +108,7 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
         st.error(f"Error al subir a Google Drive: {e}")
         return None
 
-# --- INTERFAZ GRÁFICA MÓVIL ---
+# --- INTERFAZ GRÁFICA ---
 st.title("📝 Mi Libreta Inteligente")
 
 if "modo_escaneo" not in st.session_state:
@@ -100,9 +122,9 @@ if not st.session_state.modo_escaneo:
         st.session_state.modo_escaneo = True
         st.rerun()
         
-    st.info("💡 Consejo: Al presionar el botón, la cámara se abrirá al instante gracias a la optimización local.")
+    st.info("💡 Consejo: Pon la hoja en un lugar plano y bien iluminado antes de disparar.")
 
-# PANTALLA B: Modo Cámara Activo (Sin Lag)
+# PANTALLA B: Modo Cámara Activo (Sin Lag y Ajustado)
 else:
     st.subheader("📷 Escáner Activo")
     
@@ -110,15 +132,16 @@ else:
         st.session_state.modo_escaneo = False
         st.rerun()
 
-    # Desplegar el visor de cámara de alta velocidad
+    st.write("Apunta a la libreta y presiona el botón rojo superior:")
+    
+    # Desplegar el nuevo visor adaptado a teléfonos
     data_url = camara_ultra_rapida_js()
 
-    # 🟢 CONTROL CLAVE: Solo procesamos si el usuario YA capturó la foto y data_url tiene texto válido
+    # Procesar solo cuando data_url reciba la señal del botón
     if data_url and isinstance(data_url, str) and ";base64," in data_url:
         st.info("Procesando imagen con filtro avanzado...")
         
         try:
-            # Decodificar el String Base64 que viene de JavaScript a bytes puros de imagen
             format, imgstr = data_url.split(';base64,')
             bytes_data = base64.b64decode(imgstr)
             
@@ -134,7 +157,7 @@ else:
                 nombre_base = "APUNTE_MANUAL"
                 st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
 
-            # Filtro de Limpieza Avanzado (Filtro Mágico)
+            # Filtro de Limpieza Avanzado
             canales = cv2.split(img)
             canales_limpios = []
             kernel_fondo = cv2.getStructuringElement(cv2.MORPH_RECT, (51, 51))
@@ -148,16 +171,15 @@ else:
                 
             img_final_color = cv2.merge(canales_limpios)
 
-            # Mostrar el resultado final en la app
+            # Vista previa del documento procesado
             st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
 
-            # Convertir la imagen limpia de OpenCV de vuelta a bytes (JPEG) para enviarla a Drive
+            # Convertir a JPEG para subir
             _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
             bytes_limpios = buffer_limpio.tobytes()
 
-            # Configurar la subida usando los Secrets guardados en Streamlit
             nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
-            folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "CAMBIA_POR_EL_ID_DE_TU_CARPETA"
+            folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "ID_DE_TU_CARPETA"
             creadenciales_dict = st.secrets["gcp_service_account"]
 
             st.write("Subiendo a tu Google Drive...")
@@ -167,8 +189,7 @@ else:
                 st.balloons()
                 st.success(f"🎉 ¡Guardado en Drive perfectamente!")
                 st.session_state.modo_escaneo = False
-                st.write("Volviendo al menú principal...")
-                st.button("Ok", on_click=st.rerun)
+                st.rerun()
                 
         except Exception as error_procesamiento:
             st.error(f"Error al procesar la captura: {error_procesamiento}")
