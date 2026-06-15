@@ -75,7 +75,7 @@ def camara_ultra_rapida_js():
         });
     </script>
     """
-    return components.html(html_code, height=540)
+    return components.html(html_code, height=540, scrolling=False)
 
 # --- CONEXIÓN A DRIVE ---
 def conectar_drive():
