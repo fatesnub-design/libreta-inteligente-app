@@ -113,57 +113,62 @@ else:
     # Desplegar el visor de cámara de alta velocidad
     data_url = camara_ultra_rapida_js()
 
-    if data_url:
+    # 🟢 CONTROL CLAVE: Solo procesamos si el usuario YA capturó la foto y data_url tiene texto válido
+    if data_url and isinstance(data_url, str) and ";base64," in data_url:
         st.info("Procesando imagen con filtro avanzado...")
         
-        # Decodificar el String Base64 que viene de JavaScript a bytes puros de imagen
-        format, imgstr = data_url.split(';base64,')
-        bytes_data = base64.b64decode(imgstr)
-        
-        img_array = np.frombuffer(bytes_data, np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-        # Escaneo de QR
-        codigos_qr = decode(img)
-        if codigos_qr:
-            nombre_base = codigos_qr[0].data.decode('utf-8')
-            st.success(f"🔗 Código QR detectado: **{nombre_base}**")
-        else:
-            nombre_base = "APUNTE_MANUAL"
-            st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
-
-        # Filtro de Limpieza Avanzado (Filtro Mágico)
-        canales = cv2.split(img)
-        canales_limpios = []
-        kernel_fondo = cv2.getStructuringElement(cv2.MORPH_RECT, (51, 51))
-        for canal in canales:
-            background = cv2.morphologyEx(canal, cv2.MORPH_CLOSE, kernel_fondo)
-            background = cv2.GaussianBlur(background, (3, 3), 0)
-            canal_normalizado = cv2.divide(canal, background, scale=255)
-            _, canal_limpio = cv2.threshold(canal_normalizado, 240, 255, cv2.THRESH_TRUNC)
-            canal_final = cv2.normalize(canal_limpio, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-            canales_limpios.append(canal_final)
+        try:
+            # Decodificar el String Base64 que viene de JavaScript a bytes puros de imagen
+            format, imgstr = data_url.split(';base64,')
+            bytes_data = base64.b64decode(imgstr)
             
-        img_final_color = cv2.merge(canales_limpios)
+            img_array = np.frombuffer(bytes_data, np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-        # Mostrar el resultado final en la app
-        st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
+            # Escaneo de QR
+            codigos_qr = decode(img)
+            if codigos_qr:
+                nombre_base = codigos_qr[0].data.decode('utf-8')
+                st.success(f"🔗 Código QR detectado: **{nombre_base}**")
+            else:
+                nombre_base = "APUNTE_MANUAL"
+                st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
 
-        # Convertir la imagen limpia de OpenCV de vuelta a bytes (JPEG) para enviarla a Drive
-        _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
-        bytes_limpios = buffer_limpio.tobytes()
+            # Filtro de Limpieza Avanzado (Filtro Mágico)
+            canales = cv2.split(img)
+            canales_limpios = []
+            kernel_fondo = cv2.getStructuringElement(cv2.MORPH_RECT, (51, 51))
+            for canal in canales:
+                background = cv2.morphologyEx(canal, cv2.MORPH_CLOSE, kernel_fondo)
+                background = cv2.GaussianBlur(background, (3, 3), 0)
+                canal_normalizado = cv2.divide(canal, background, scale=255)
+                _, canal_limpio = cv2.threshold(canal_normalizado, 240, 255, cv2.THRESH_TRUNC)
+                canal_final = cv2.normalize(canal_limpio, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+                canales_limpios.append(canal_final)
+                
+            img_final_color = cv2.merge(canales_limpios)
 
-        # Configurar la subida usando los Secrets guardados en Streamlit
-        nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
-        folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "CAMBIA_POR_EL_ID_DE_TU_CARPETA"
-        creadenciales_dict = st.secrets["gcp_service_account"]
+            # Mostrar el resultado final en la app
+            st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
 
-        st.write("Subiendo a tu Google Drive...")
-        id_drive = subir_a_drive(bytes_limpios, nombre_archivo_drive, folder_id, creadenciales_dict)
-        
-        if id_drive:
-            st.balloons()
-            st.success(f"🎉 ¡Guardado en Drive perfectamente!")
-            st.session_state.modo_escaneo = False
-            st.write("Volviendo al menú principal...")
-            st.button("Ok", on_click=st.rerun)
+            # Convertir la imagen limpia de OpenCV de vuelta a bytes (JPEG) para enviarla a Drive
+            _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
+            bytes_limpios = buffer_limpio.tobytes()
+
+            # Configurar la subida usando los Secrets guardados en Streamlit
+            nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
+            folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "CAMBIA_POR_EL_ID_DE_TU_CARPETA"
+            creadenciales_dict = st.secrets["gcp_service_account"]
+
+            st.write("Subiendo a tu Google Drive...")
+            id_drive = subir_a_drive(bytes_limpios, nombre_archivo_drive, folder_id, creadenciales_dict)
+            
+            if id_drive:
+                st.balloons()
+                st.success(f"🎉 ¡Guardado en Drive perfectamente!")
+                st.session_state.modo_escaneo = False
+                st.write("Volviendo al menú principal...")
+                st.button("Ok", on_click=st.rerun)
+                
+        except Exception as error_procesamiento:
+            st.error(f"Error al procesar la captura: {error_procesamiento}")
