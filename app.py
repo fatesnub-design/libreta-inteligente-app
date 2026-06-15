@@ -16,14 +16,31 @@ def conectar_drive():
     credenciales = service_account.Credentials.from_service_account_info(info_claves)
     return build('drive', 'v3', credentials=credenciales)
 
-def subir_a_drive(ruta_archivo_local, nombre_final):
+def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
     try:
-        drive_service = conectar_drive()
-        ID_CARPETA_DRIVE = st.secrets["id_carpeta_drive"] 
-        metadata_archivo = {'name': nombre_final, 'parents': [ID_CARPETA_DRIVE]}
-        media = MediaFileUpload(ruta_archivo_local, mimetype='image/png')
-        archivo_subido = drive_service.files().create(body=metadata_archivo, media_body=media, fields='id').execute()
-        return archivo_subido.get('id')
+        # Autenticación con los Secrets de la cuenta de servicio
+        creds = service_account.Credentials.from_service_account_info(creadenciales_dict)
+        service = build('drive', 'v3', credentials=creds)
+        
+        # Preparar el archivo en memoria
+        media = MediaIoBaseUpload(io.BytesIO(bytes_image), mimetype='image/jpeg', resumable=True)
+        
+        # Datos del archivo en Drive
+        file_metadata = {
+            'name': nombre_archivo,
+            'parents': [folder_id]
+        }
+        
+        # Crear y subir el archivo en la carpeta compartida
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id',
+            supportsAllDrives=True  # <-- Esta línea soluciona el error de cuota de almacenamiento
+        ).execute()
+        
+        return file.get('id')
+        
     except Exception as e:
         st.error(f"Error al subir a Google Drive: {e}")
         return None
