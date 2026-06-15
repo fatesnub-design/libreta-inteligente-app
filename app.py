@@ -30,16 +30,32 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
             'parents': [folder_id]
         }
         
-        # 🌟 FIJACIÓN CLAVE CONTRA EL ERROR 403:
-        # Usamos supportsAllDrives=True para validar la subida en carpetas compartidas de cuentas estándar
+        # 1. Creamos el archivo de forma normal
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id',
-            supportsAllDrives=True
+            fields='id'
         ).execute()
         
-        return file.get('id')
+        file_id = file.get('id')
+        
+        # 2. 🔥 EL TRUCO DE MAGIA: Le creamos un permiso al archivo para que TU correo personal
+        # sea el dueño legítimo (owner). Al transferir la propiedad, el archivo consume tus 15GB 
+        # libres de Gmail y deja de consumir los 0 bytes del robot.
+        if file_id:
+            permission_metadata = {
+                'type': 'user',
+                'role': 'owner',
+                'emailAddress': 'fatesnub@gmail.com' # <-- Coloca aquí tu correo de Gmail
+            }
+            # Forzamos la transferencia de propiedad
+            service.permissions().create(
+                fileId=file_id,
+                body=permission_metadata,
+                transferOwnership=True
+            ).execute()
+            
+        return file_id
         
     except Exception as e:
         st.error(f"🚨 Error dentro de la función subir_a_drive: {e}")
