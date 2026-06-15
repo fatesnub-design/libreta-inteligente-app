@@ -22,7 +22,7 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
         creds = service_account.Credentials.from_service_account_info(creadenciales_dict)
         service = build('drive', 'v3', credentials=creds)
         
-        # Preparar el archivo desde memoria RAM
+        # Preparar el archivo en memoria RAM
         media = MediaIoBaseUpload(io.BytesIO(bytes_image), mimetype='image/jpeg', resumable=True)
         
         file_metadata = {
@@ -30,8 +30,8 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
             'parents': [folder_id]
         }
         
-        # EXPLICACIÓN DEL CAMBIO: Forzamos supportsAllDrives=True y mantenemos los metadatos limpios
-        # para que el archivo herede el almacenamiento directo de tu carpeta contenedora personal.
+        # 🌟 FIJACIÓN CLAVE CONTRA EL ERROR 403:
+        # Usamos supportsAllDrives=True para validar la subida en carpetas compartidas de cuentas estándar
         file = service.files().create(
             body=file_metadata,
             media_body=media,
@@ -53,13 +53,13 @@ if "modo_escaneo" not in st.session_state:
 
 # PANTALLA A: Menú de Inicio Principal
 if not st.session_state.modo_escaneo:
-    st.write("¡Bienvenido, Carlos! Organiza tus apuntes de la universidad al instante.")
+    st.write("Organiza tus apuntes de la universidad al instante.")
     st.write("")
     if st.button("🚀 EMPEZAR A ESCANEAR APUNTES", use_container_width=True):
         st.session_state.modo_escaneo = True
         st.rerun()
         
-    st.info("💡 Consejo: Al avanzar, selecciona 'Cámara' para capturar la hoja o súbela desde tu galería.")
+    st.info("💡 Consejo: Puedes tomar la foto con la cámara de tu celular y subirla directamente desde la galería.")
 
 # PANTALLA B: Modo Escaneo Activo
 else:
@@ -96,7 +96,7 @@ else:
                     nombre_base = "APUNTE_MANUAL"
                     st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
 
-                # --- FILTRO MÁGICO QUE CONSERVA COLORES VIVOS ---
+                # --- FILTRO MÁGICO EQUILIBRADO ---
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
                 dilated = cv2.dilate(gray, kernel)
@@ -104,18 +104,18 @@ else:
                 img_normalizada = cv2.divide(img, cv2.merge([bg_img, bg_img, bg_img]), scale=255)
                 img_final_color = cv2.convertScaleAbs(img_normalizada, alpha=1.05, beta=0)
 
-                # Mostrar resultado estable en pantalla
+                # Mostrar resultado en pantalla (Como en image_f1b660.jpg, ¡se ve excelente!)
                 st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
 
                 # Convertir a Bytes para Drive
                 _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
                 bytes_limpios = buffer_limpio.tobytes()
 
-                # Envío a Drive (Usa el ID de tu carpeta "Prueba Libreta")
+                # Envío a Drive
                 nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
                 creadenciales_dict = st.secrets["gcp_service_account"]
                 
-                # Coloca aquí el ID largo de la carpeta "Prueba Libreta" que obtuviste de la URL
+                # 🛠️ REPLAZA ESTO: Asegúrate de colocar el ID de tu carpeta "Prueba Libreta" aquí
                 folder_id = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
 
                 st.write("Subiendo a tu Google Drive...")
@@ -124,7 +124,7 @@ else:
                 if id_drive:
                     st.balloons()
                     st.success(f"🎉 ¡Guardado en Drive perfectamente!")
-                    st.info("Ya puedes presionar 'Volver al Inicio' arriba.")
+                    st.info("Ya puedes presionar 'Volver al Inicio' arriba para realizar otro escaneo.")
                 
         except Exception as error_procesamiento:
-            st.error(f"💥 Error: {error_procesamiento}")
+            st.error(f"💥 Error durante el proceso: {error_procesamiento}")
