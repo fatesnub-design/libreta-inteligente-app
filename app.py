@@ -117,7 +117,7 @@ else:
 
             # Configuración de rutas usando los Secrets de Streamlit
             nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
-            folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "ID_DE_TU_CARPETA"
+            folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
             creadenciales_dict = st.secrets["gcp_service_account"]
 
             st.write("Subiendo a tu Google Drive...")
