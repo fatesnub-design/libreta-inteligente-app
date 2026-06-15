@@ -30,18 +30,19 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
             'parents': [folder_id]
         }
         
-        # Sube vinculando la propiedad al dueño de la carpeta destino
+        # EXPLICACIÓN DEL CAMBIO: Forzamos supportsAllDrives=True y mantenemos los metadatos limpios
+        # para que el archivo herede el almacenamiento directo de tu carpeta contenedora personal.
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id',
-            supportsAllDrives=True  # Rompe el bloqueo de cuota
+            supportsAllDrives=True
         ).execute()
         
         return file.get('id')
         
     except Exception as e:
-        st.error(f"Error al subir a Google Drive: {e}")
+        st.error(f"🚨 Error dentro de la función subir_a_drive: {e}")
         return None
 
 # --- INTERFAZ GRÁFICA MÓVIL ---
@@ -58,9 +59,9 @@ if not st.session_state.modo_escaneo:
         st.session_state.modo_escaneo = True
         st.rerun()
         
-    st.info("💡 Consejo: Al avanzar, selecciona 'Cámara' para tomar la foto en alta definición y sin retrasos.")
+    st.info("💡 Consejo: Al avanzar, selecciona 'Cámara' para capturar la hoja o súbela desde tu galería.")
 
-# PANTALLA B: Modo Escaneo Activo (Uploader Nativo Totalmente Compatible)
+# PANTALLA B: Modo Escaneo Activo
 else:
     st.subheader("📷 Escáner Activo")
     
@@ -68,11 +69,10 @@ else:
         st.session_state.modo_escaneo = False
         st.rerun()
 
-    st.write("Presiona abajo para tomar la foto de tu apunte:")
+    st.write("Presiona abajo para cargar o tomar la foto de tu apunte:")
     
-    # Este componente abre la app de la cámara del celular directamente al interactuar en móviles
     archivo_capturado = st.file_uploader(
-        "Selecciona 'Cámara' para capturar la hoja completa con el QR", 
+        "Captura la hoja completa con el QR", 
         type=["jpg", "jpeg", "png"]
     )
 
@@ -80,55 +80,51 @@ else:
         st.info("Procesando imagen con filtro avanzado...")
         
         try:
-            # Leer los bytes del archivo cargado
             bytes_data = archivo_capturado.read()
             img_array = np.frombuffer(bytes_data, np.uint8)
             img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-            # Escaneo de QR
-            codigos_qr = decode(img)
-            if codigos_qr:
-                nombre_base = codigos_qr[0].data.decode('utf-8')
-                st.success(f"🔗 Código QR detectado: **{nombre_base}**")
+            if img is None:
+                st.error("🚨 OpenCV no pudo decodificar la imagen.")
             else:
-                nombre_base = "APUNTE_MANUAL"
-                st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
+                # Escaneo de QR
+                codigos_qr = decode(img)
+                if codigos_qr:
+                    nombre_base = codigos_qr[0].data.decode('utf-8')
+                    st.success(f"🔗 Código QR detectado: **{nombre_base}**")
+                else:
+                    nombre_base = "APUNTE_MANUAL"
+                    st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
 
-            # Filtro de Limpieza Avanzado (Filtro Mágico de OpenCV)
-            canales = cv2.split(img)
-            canales_limpios = []
-            kernel_fondo = cv2.getStructuringElement(cv2.MORPH_RECT, (51, 51))
-            for canal in canales:
-                background = cv2.morphologyEx(canal, cv2.MORPH_CLOSE, kernel_fondo)
-                background = cv2.GaussianBlur(background, (3, 3), 0)
-                canal_normalizado = cv2.divide(canal, background, scale=255)
-                _, canal_limpio = cv2.threshold(canal_normalizado, 240, 255, cv2.THRESH_TRUNC)
-                canal_final = cv2.normalize(canal_limpio, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-                canales_limpios.append(canal_final)
+                # --- FILTRO MÁGICO QUE CONSERVA COLORES VIVOS ---
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+                dilated = cv2.dilate(gray, kernel)
+                bg_img = cv2.medianBlur(dilated, 21)
+                img_normalizada = cv2.divide(img, cv2.merge([bg_img, bg_img, bg_img]), scale=255)
+                img_final_color = cv2.convertScaleAbs(img_normalizada, alpha=1.05, beta=0)
+
+                # Mostrar resultado estable en pantalla
+                st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
+
+                # Convertir a Bytes para Drive
+                _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
+                bytes_limpios = buffer_limpio.tobytes()
+
+                # Envío a Drive (Usa el ID de tu carpeta "Prueba Libreta")
+                nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
+                creadenciales_dict = st.secrets["gcp_service_account"]
                 
-            img_final_color = cv2.merge(canales_limpios)
+                # Coloca aquí el ID largo de la carpeta "Prueba Libreta" que obtuviste de la URL
+                folder_id = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
 
-            # Mostrar resultado limpio en pantalla
-            st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
-
-            # Convertir de OpenCV a Bytes para Google Drive
-            _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
-            bytes_limpios = buffer_limpio.tobytes()
-
-            # Configuración de rutas usando los Secrets de Streamlit
-            nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
-            folder_id = st.secrets["gcp_service_account"]["folder_id"] if "folder_id" in st.secrets["gcp_service_account"] else "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
-            creadenciales_dict = st.secrets["gcp_service_account"]
-
-            st.write("Subiendo a tu Google Drive...")
-            id_drive = subir_a_drive(bytes_limpios, nombre_archivo_drive, folder_id, creadenciales_dict)
-            
-            if id_drive:
-                st.balloons()
-                st.success(f"🎉 ¡Guardado en Drive perfectamente!")
-                st.session_state.modo_escaneo = False
-                st.write("Volviendo al menú principal...")
-                st.button("Ok", on_click=st.rerun)
+                st.write("Subiendo a tu Google Drive...")
+                id_drive = subir_a_drive(bytes_limpios, nombre_archivo_drive, folder_id, creadenciales_dict)
+                
+                if id_drive:
+                    st.balloons()
+                    st.success(f"🎉 ¡Guardado en Drive perfectamente!")
+                    st.info("Ya puedes presionar 'Volver al Inicio' arriba.")
                 
         except Exception as error_procesamiento:
-            st.error(f"Error al procesar la captura: {error_procesamiento}")
+            st.error(f"💥 Error: {error_procesamiento}")
