@@ -30,7 +30,7 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
             'parents': [folder_id]
         }
         
-        # 1. Creamos el archivo de forma normal
+        # 1. El robot crea el archivo en la carpeta compartida
         file = service.files().create(
             body=file_metadata,
             media_body=media,
@@ -39,20 +39,18 @@ def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
         
         file_id = file.get('id')
         
-        # 2. 🔥 EL TRUCO DE MAGIA: Le creamos un permiso al archivo para que TU correo personal
-        # sea el dueño legítimo (owner). Al transferir la propiedad, el archivo consume tus 15GB 
-        # libres de Gmail y deja de consumir los 0 bytes del robot.
+        # 2. 🔥 SOLUCIÓN AL ERROR 403: El robot le transfiere la propiedad a tu cuenta personal.
+        # Esto hace que consuma espacio de tus 15GB libres y no del espacio vacío del robot.
         if file_id:
             permission_metadata = {
                 'type': 'user',
                 'role': 'owner',
-                'emailAddress': 'fatesnub@gmail.com' # <-- Coloca aquí tu correo de Gmail
+                'emailAddress': 'fatesnub@gmail.com'  # <-- Tu correo asignado como dueño legítimo
             }
-            # Forzamos la transferencia de propiedad
             service.permissions().create(
                 fileId=file_id,
                 body=permission_metadata,
-                transferOwnership=True
+                transferOwnership=True  # Forzamos la transferencia inmediata
             ).execute()
             
         return file_id
@@ -75,7 +73,7 @@ if not st.session_state.modo_escaneo:
         st.session_state.modo_escaneo = True
         st.rerun()
         
-    st.info("💡 Consejo: Puedes tomar la foto con la cámara de tu celular y subirla directamente desde la galería.")
+    st.info("💡 Consejo: Puedes tomar la foto con la cámara de tu celular y subirla directamente desde la galería para evitar el lag.")
 
 # PANTALLA B: Modo Escaneo Activo
 else:
@@ -112,7 +110,7 @@ else:
                     nombre_base = "APUNTE_MANUAL"
                     st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
 
-                # --- FILTRO MÁGICO EQUILIBRADO ---
+                # --- FILTRO MÁGICO EQUILIBRADO (Conserva colores vivos de plumas) ---
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
                 dilated = cv2.dilate(gray, kernel)
@@ -120,7 +118,7 @@ else:
                 img_normalizada = cv2.divide(img, cv2.merge([bg_img, bg_img, bg_img]), scale=255)
                 img_final_color = cv2.convertScaleAbs(img_normalizada, alpha=1.05, beta=0)
 
-                # Mostrar resultado en pantalla (Como en image_f1b660.jpg, ¡se ve excelente!)
+                # Mostrar resultado en pantalla
                 st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
 
                 # Convertir a Bytes para Drive
@@ -131,8 +129,12 @@ else:
                 nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
                 creadenciales_dict = st.secrets["gcp_service_account"]
                 
-                # 🛠️ REPLAZA ESTO: Asegúrate de colocar el ID de tu carpeta "Prueba Libreta" aquí
-                folder_id = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
+                # Buscamos el ID de la carpeta de tus Secrets o de respaldo el que tienes en tu URL
+                if "folder_id" in st.secrets["gcp_service_account"]:
+                    folder_id = st.secrets["gcp_service_account"]["folder_id"]
+                else:
+                    # Coloca aquí el ID largo de la carpeta "Prueba Libreta" si no lo tienes en Secrets
+                    folder_id = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
 
                 st.write("Subiendo a tu Google Drive...")
                 id_drive = subir_a_drive(bytes_limpios, nombre_archivo_drive, folder_id, creadenciales_dict)
