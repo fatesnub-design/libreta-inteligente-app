@@ -6,7 +6,8 @@ from googleapiclient.discovery import build
 def get_oauth_flow():
     REDIRECT_URI = "https://libreta-inteligente-app-cuvw9pyvwfnahbhrvzjseb.streamlit.app/"
     
-    # Importante: Asegúrate de tener el Client ID y Secret en los secrets de Streamlit
+    # Usamos flow_from_client_secrets o configuramos el flujo explícitamente
+    # para que sea compatible con aplicaciones web estándar.
     flow = Flow.from_client_config(
         {
             "web": {
@@ -21,8 +22,9 @@ def get_oauth_flow():
         redirect_uri=REDIRECT_URI
     )
     
-    # Esto habilita PKCE, que es lo que Google te está pidiendo
-    flow.code_verifier = None 
+    # IMPORTANTE: Desactivar el requerimiento de PKCE que está causando el error
+    # al forzar que no busque un verifier que no se guardó en la sesión.
+    flow.code_verifier = None
     return flow
 
 # --- Lógica de Captura del Token ---
