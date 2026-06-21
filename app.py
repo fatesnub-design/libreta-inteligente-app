@@ -4,19 +4,24 @@ from googleapiclient.discovery import build
 
 # Configuración del flujo OAuth
 def get_oauth_flow():
-    return Flow.from_client_config(
+    # Definimos la URL de forma explícita
+    REDIRECT_URI = "https://libreta-inteligente-app-cuvw9pyvwfnahbhrvzjseb.streamlit.app/"
+    
+    flow = Flow.from_client_config(
         {
             "web": {
                 "client_id": st.secrets["GOOGLE_CLIENT_ID"],
                 "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["https://libreta-inteligente-app-cuvw9pyvwfnahbhrvzjseb.streamlit.app/"]
+                "redirect_uris": [REDIRECT_URI] # Asegúrate de que esto sea una lista
             }
         },
-        scopes=["https://www.googleapis.com/auth/drive.file"]
+        scopes=["https://www.googleapis.com/auth/drive.file"],
+        redirect_uri=REDIRECT_URI # <--- ¡ESTA ES LA LÍNEA QUE FALTA!
     )
-
+    return flow
+    
 # --- Interfaz ---
 st.title("📝 Mi Libreta Inteligente")
 
