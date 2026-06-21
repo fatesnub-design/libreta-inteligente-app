@@ -32,19 +32,22 @@ code = query_params.get("code")
 if code and "credentials" not in st.session_state:
     try:
         flow = get_oauth_flow()
-        # Intercambiamos el código por el token
-        flow.fetch_token(code=code)
+        
+        # AQUÍ ESTÁ EL CAMBIO: 
+        # Forzamos la obtención del token pasando el código directamente 
+        # y eliminando la dependencia de estados previos que fallan.
+        flow.fetch_token(code=code, include_client_id=True)
+        
         st.session_state["credentials"] = flow.credentials
         
-        # EL TRUCO: Limpiar la URL para que no intente usar el mismo código otra vez
-        st.query_params.clear() 
+        # Limpiamos los parámetros para que la URL se vea limpia
+        st.query_params.clear()
         st.rerun()
+        
     except Exception as e:
         st.error(f"Error al obtener el token: {e}")
-        st.warning("El código ya expiró o fue usado. Por favor, intenta conectar de nuevo.")
-        # Limpiamos si falla para que el usuario pueda volver a intentar
-        if "code" in st.query_params:
-            st.query_params.clear()
+        # Si falla, limpiamos para permitir reintento
+        st.query_params.clear()
 
 # 3. Interfaz de usuario
 st.title("📝 Mi Libreta Inteligente")
