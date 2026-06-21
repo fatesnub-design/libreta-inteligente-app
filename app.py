@@ -20,6 +20,13 @@ def get_oauth_flow():
 # --- Interfaz ---
 st.title("📝 Mi Libreta Inteligente")
 
+# Añade esto justo antes de generar la URL de autorización
+st.write("---")
+st.write("Configuración del Flujo:")
+st.write(f"Client ID: {st.secrets['GOOGLE_CLIENT_ID']}")
+st.write(f"Redirect URI real en el objeto flow: {get_oauth_flow().redirect_uri}")
+st.write("---")
+
 # Si no hay credenciales, mostramos botón de Login
 if 'credentials' not in st.session_state:
     flow = get_oauth_flow()
