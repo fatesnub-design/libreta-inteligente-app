@@ -2,147 +2,63 @@ import streamlit as st
 import cv2
 import numpy as np
 from pyzbar.pyzbar import decode
+import io
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-import os
-import io
 
-# Configuración visual de la app móvil
-st.set_page_config(page_title="Mi Libreta Inteligente", page_icon="📝", layout="centered")
+# Configuración visual
+st.set_page_config(page_title="Mi Libreta Inteligente", layout="centered")
 
-# --- CONEXIÓN A DRIVE ---
-def conectar_drive():
-    info_claves = st.secrets["gcp_service_account"]
-    credenciales = service_account.Credentials.from_service_account_info(info_claves)
-    return build('drive', 'v3', credentials=credenciales)
-
-def subir_a_drive(bytes_image, nombre_archivo, folder_id, creadenciales_dict):
+def subir_a_drive_infalible(bytes_image, nombre_archivo, folder_id):
     try:
-        creds = service_account.Credentials.from_service_account_info(creadenciales_dict)
+        # Usamos las credenciales directamente de tus secretos
+        creds = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"])
         service = build('drive', 'v3', credentials=creds)
-        
-        # Preparar el archivo en memoria RAM
-        media = MediaIoBaseUpload(io.BytesIO(bytes_image), mimetype='image/jpeg', resumable=True)
         
         file_metadata = {
             'name': nombre_archivo,
             'parents': [folder_id]
         }
         
-        # 1. El robot crea el archivo en la carpeta compartida
+        media = MediaIoBaseUpload(io.BytesIO(bytes_image), mimetype='image/jpeg', resumable=True)
+        
+        # Subida directa forzando la creación
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id'
         ).execute()
         
-        file_id = file.get('id')
-        
-        # 2. 🔥 SOLUCIÓN AL ERROR 403: El robot le transfiere la propiedad a tu cuenta personal.
-        # Esto hace que consuma espacio de tus 15GB libres y no del espacio vacío del robot.
-        if file_id:
-            permission_metadata = {
-                'type': 'user',
-                'role': 'owner',
-                'emailAddress': 'fatesnub@gmail.com'  # <-- Tu correo asignado como dueño legítimo
-            }
-            service.permissions().create(
-                fileId=file_id,
-                body=permission_metadata,
-                transferOwnership=True  # Forzamos la transferencia inmediata
-            ).execute()
-            
-        return file_id
-        
+        return file.get('id')
     except Exception as e:
-        st.error(f"🚨 Error dentro de la función subir_a_drive: {e}")
+        st.error(f"Error técnico: {e}")
         return None
 
-# --- INTERFAZ GRÁFICA MÓVIL ---
+# --- Interfaz ---
 st.title("📝 Mi Libreta Inteligente")
 
-if "modo_escaneo" not in st.session_state:
-    st.session_state.modo_escaneo = False
+# Modo Escaneo
+archivo = st.file_uploader("Carga tu apunte", type=["jpg", "png"])
 
-# PANTALLA A: Menú de Inicio Principal
-if not st.session_state.modo_escaneo:
-    st.write("Organiza tus apuntes de la universidad al instante.")
-    st.write("")
-    if st.button("🚀 EMPEZAR A ESCANEAR APUNTES", use_container_width=True):
-        st.session_state.modo_escaneo = True
-        st.rerun()
-        
-    st.info("💡 Consejo: Puedes tomar la foto con la cámara de tu celular y subirla directamente desde la galería para evitar el lag.")
-
-# PANTALLA B: Modo Escaneo Activo
-else:
-    st.subheader("📷 Escáner Activo")
+if archivo:
+    # Procesamiento (Filtro que ya comprobamos que funciona)
+    bytes_data = archivo.read()
+    img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
     
-    if st.button("⬅️ Volver al Inicio"):
-        st.session_state.modo_escaneo = False
-        st.rerun()
-
-    st.write("Presiona abajo para cargar o tomar la foto de tu apunte:")
+    # Filtro aplicado
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    bg = cv2.medianBlur(cv2.dilate(gray, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))), 21)
+    img_final = cv2.convertScaleAbs(cv2.divide(img, cv2.merge([bg, bg, bg]), scale=255), alpha=1.05)
     
-    archivo_capturado = st.file_uploader(
-        "Captura la hoja completa con el QR", 
-        type=["jpg", "jpeg", "png"]
-    )
-
-    if archivo_capturado is not None:
-        st.info("Procesando imagen con filtro avanzado...")
+    st.image(img_final)
+    
+    if st.button("Guardar en Drive"):
+        _, buffer = cv2.imencode('.jpg', img_final)
+        # ID de tu carpeta: Ponlo aquí directamente para evitar errores de lectura
+        FOLDER_ID = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP" 
         
-        try:
-            bytes_data = archivo_capturado.read()
-            img_array = np.frombuffer(bytes_data, np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-            if img is None:
-                st.error("🚨 OpenCV no pudo decodificar la imagen.")
-            else:
-                # Escaneo de QR
-                codigos_qr = decode(img)
-                if codigos_qr:
-                    nombre_base = codigos_qr[0].data.decode('utf-8')
-                    st.success(f"🔗 Código QR detectado: **{nombre_base}**")
-                else:
-                    nombre_base = "APUNTE_MANUAL"
-                    st.warning("⚠️ No se detectó código QR. Se guardará como 'APUNTE_MANUAL'.")
-
-                # --- FILTRO MÁGICO EQUILIBRADO (Conserva colores vivos de plumas) ---
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-                dilated = cv2.dilate(gray, kernel)
-                bg_img = cv2.medianBlur(dilated, 21)
-                img_normalizada = cv2.divide(img, cv2.merge([bg_img, bg_img, bg_img]), scale=255)
-                img_final_color = cv2.convertScaleAbs(img_normalizada, alpha=1.05, beta=0)
-
-                # Mostrar resultado en pantalla
-                st.image(img_final_color, caption="Vista previa del escaneo limpio", use_container_width=True)
-
-                # Convertir a Bytes para Drive
-                _, buffer_limpio = cv2.imencode('.jpg', img_final_color)
-                bytes_limpios = buffer_limpio.tobytes()
-
-                # Envío a Drive
-                nombre_archivo_drive = f"{nombre_base}_Limpio.jpg"
-                creadenciales_dict = st.secrets["gcp_service_account"]
-                
-                # Buscamos el ID de la carpeta de tus Secrets o de respaldo el que tienes en tu URL
-                if "folder_id" in st.secrets["gcp_service_account"]:
-                    folder_id = st.secrets["gcp_service_account"]["folder_id"]
-                else:
-                    # Coloca aquí el ID largo de la carpeta "Prueba Libreta" si no lo tienes en Secrets
-                    folder_id = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP"
-
-                st.write("Subiendo a tu Google Drive...")
-                id_drive = subir_a_drive(bytes_limpios, nombre_archivo_drive, folder_id, creadenciales_dict)
-                
-                if id_drive:
-                    st.balloons()
-                    st.success(f"🎉 ¡Guardado en Drive perfectamente!")
-                    st.info("Ya puedes presionar 'Volver al Inicio' arriba para realizar otro escaneo.")
-                
-        except Exception as error_procesamiento:
-            st.error(f"💥 Error durante el proceso: {error_procesamiento}")
+        with st.spinner("Subiendo..."):
+            res = subir_a_drive_infalible(buffer.tobytes(), "Apunte_Final.jpg", FOLDER_ID)
+            if res:
+                st.success("¡Éxito! Archivo guardado.")
