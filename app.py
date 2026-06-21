@@ -23,7 +23,7 @@ st.title("📝 Mi Libreta Inteligente")
 # Si no hay credenciales, mostramos botón de Login
 if 'credentials' not in st.session_state:
     flow = get_oauth_flow()
-    auth_url, _ = flow.authorization_url(prompt='consent')
+    auth_url, _ = flow.authorization_url(prompt='select_account')
     st.markdown(f'[Haz clic aquí para conectar tu Google Drive]({auth_url})')
     
     # Aquí iría la lógica para capturar el 'code' de la URL y generar el token
