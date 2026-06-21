@@ -2,6 +2,18 @@ import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
+# --- Lógica de Captura del Token ---
+query_params = st.query_params
+if "code" in query_params and "credentials" not in st.session_state:
+    flow = get_oauth_flow()
+    # Usamos el código de la URL para obtener el token
+    flow.fetch_token(code=query_params["code"])
+    
+    # Guardamos las credenciales en la sesión
+    st.session_state["credentials"] = flow.credentials
+    st.success("¡Autenticación exitosa!")
+    st.rerun() # Recargamos para limpiar la URL y mostrar la app funcionando
+
 # Configuración del flujo OAuth
 def get_oauth_flow():
     # Definimos la URL de forma explícita
