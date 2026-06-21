@@ -19,13 +19,26 @@ def get_oauth_flow():
         redirect_uri=REDIRECT_URI
     )
 
-# 2. Lógica de captura del token (aquí es donde evitamos que falle al inicio)
+# --- Lógica de Captura del Token ---
 query_params = st.query_params
-if "code" in query_params and "credentials" not in st.session_state:
-    flow = get_oauth_flow() # Ahora sí existe
-    flow.fetch_token(code=query_params["code"])
-    st.session_state["credentials"] = flow.credentials
-    st.rerun()
+code = query_params.get("code")
+
+if code and "credentials" not in st.session_state:
+    try:
+        flow = get_oauth_flow()
+        # Intercambiamos el código por el token
+        flow.fetch_token(code=code)
+        st.session_state["credentials"] = flow.credentials
+        
+        # EL TRUCO: Limpiar la URL para que no intente usar el mismo código otra vez
+        st.query_params.clear() 
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error al obtener el token: {e}")
+        st.warning("El código ya expiró o fue usado. Por favor, intenta conectar de nuevo.")
+        # Limpiamos si falla para que el usuario pueda volver a intentar
+        if "code" in st.query_params:
+            st.query_params.clear()
 
 # 3. Interfaz de usuario
 st.title("📝 Mi Libreta Inteligente")
