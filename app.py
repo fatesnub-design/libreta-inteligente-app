@@ -12,7 +12,7 @@ st.set_page_config(page_title="Mi Libreta Inteligente", layout="centered")
 
 def subir_a_drive_infalible(bytes_image, nombre_archivo, folder_id):
     try:
-        # Usamos las credenciales directamente de tus secretos
+        # Credenciales desde Secrets
         creds = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"])
         service = build('drive', 'v3', credentials=creds)
         
@@ -23,14 +23,29 @@ def subir_a_drive_infalible(bytes_image, nombre_archivo, folder_id):
         
         media = MediaIoBaseUpload(io.BytesIO(bytes_image), mimetype='image/jpeg', resumable=True)
         
-        # Subida directa forzando la creación
+        # 1. Crear el archivo
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id'
         ).execute()
         
-        return file.get('id')
+        file_id = file.get('id')
+        
+        # 2. EL TRUCO: Transferir propiedad a TU correo personal inmediatamente
+        # Esto hace que el archivo cuente contra TU espacio de 15GB y NO contra el robot.
+        permission = {
+            'type': 'user',
+            'role': 'owner',
+            'emailAddress': 'fatesnub@gmail.com' # Tu correo personal
+        }
+        service.permissions().create(
+            fileId=file_id,
+            body=permission,
+            transferOwnership=True
+        ).execute()
+        
+        return file_id
     except Exception as e:
         st.error(f"Error técnico: {e}")
         return None
@@ -38,27 +53,25 @@ def subir_a_drive_infalible(bytes_image, nombre_archivo, folder_id):
 # --- Interfaz ---
 st.title("📝 Mi Libreta Inteligente")
 
-# Modo Escaneo
 archivo = st.file_uploader("Carga tu apunte", type=["jpg", "png"])
 
 if archivo:
-    # Procesamiento (Filtro que ya comprobamos que funciona)
+    # Procesamiento (Filtro base)
     bytes_data = archivo.read()
     img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
     
-    # Filtro aplicado
+    # Filtro aplicado (Sencillo para asegurar que corra)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    bg = cv2.medianBlur(cv2.dilate(gray, cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))), 21)
-    img_final = cv2.convertScaleAbs(cv2.divide(img, cv2.merge([bg, bg, bg]), scale=255), alpha=1.05)
+    img_final = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     
-    st.image(img_final)
+    st.image(img_final, caption="Vista previa")
     
     if st.button("Guardar en Drive"):
         _, buffer = cv2.imencode('.jpg', img_final)
-        # ID de tu carpeta: Ponlo aquí directamente para evitar errores de lectura
+        # ID DE LA CARPETA (Cópialo de la URL)
         FOLDER_ID = "1-TWnbY_l9FBMmwqjjNawh_jjeUD1_UVP" 
         
         with st.spinner("Subiendo..."):
             res = subir_a_drive_infalible(buffer.tobytes(), "Apunte_Final.jpg", FOLDER_ID)
             if res:
-                st.success("¡Éxito! Archivo guardado.")
+                st.success("¡Éxito! Archivo guardado y propiedad transferida a tu cuenta.")
