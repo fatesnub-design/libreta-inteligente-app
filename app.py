@@ -4,26 +4,21 @@ from googleapiclient.discovery import build
 
 # 1. Definimos la función primero (sin ejecutarla)
 def get_oauth_flow():
-    REDIRECT_URI = "https://libreta-inteligente-app-cuvw9pyvwfnahbhrvzjseb.streamlit.app/"
+    # En Desktop App, Google usa esta URL estándar para redirigir
+    REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
     
-    # Configuramos el flujo manualmente sin forzar PKCE
     flow = Flow.from_client_config(
         {
-            "web": {
+            "installed": { # Cambiamos 'web' por 'installed' para el flujo de Desktop
                 "client_id": st.secrets["GOOGLE_CLIENT_ID"],
                 "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [REDIRECT_URI]
             }
         },
         scopes=["https://www.googleapis.com/auth/drive.file"],
         redirect_uri=REDIRECT_URI
     )
-    
-    # FUERZA BRUTA: Esto deshabilita el PKCE de la librería
-    # que es lo que está causando el conflicto.
-    flow.oauth2session.code_verifier = None 
     return flow
 
 # --- Lógica de Captura del Token ---
