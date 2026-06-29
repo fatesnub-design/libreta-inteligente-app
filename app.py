@@ -38,22 +38,19 @@ def aplicar_filtro_escaneo(image_bytes):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     orig = img.copy()
     
-    # 2. EL SECRETO PARA EL ENTORNO REAL: Aislamos el marco negro
+    # 2. Convertir a gris y aplicar un filtro fuerte para borrar las letras del periódico
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (9, 9), 0)
     
-    # Aplicamos un desenfoque Gaussiano fuerte (11,11) para "borrar" las letras del periódico
-    # pero manteniendo visible el grueso marco negro de la libreta
-    blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+    # Binarización estricta: todo lo que sea muy oscuro (el marco negro) se vuelve blanco puro,
+    # y el periódico/mesa se vuelven negros. Así aislamos el recuadro.
+    _, thresh = cv2.threshold(blurred, 80, 255, cv2.THRESH_BINARY_INV)
     
-    # Usamos un umbral adaptativo muy específico para pintar el marco negro puro
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY_INV, 51, 11)
-    
-    # Limpieza morfológica: Une líneas rotas por sombras y elimina puntitos sueltos
+    # Limpiamos imperfecciones para cerrar el rectángulo si la sombra lo cortó
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     
-    # 3. BUSCAR EL MARCO DE LA LIBRETA
+    # 3. Buscar el contorno del recuadro de la libreta
     cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
     
@@ -61,12 +58,12 @@ def aplicar_filtro_escaneo(image_bytes):
     for c in cnts:
         peri = cv2.arcLength(c, True)
         approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        # Buscamos una figura de 4 esquinas que ocupe un tamaño razonable en la foto
-        if len(approx) == 4 and cv2.contourArea(c) > (img.shape[0] * img.shape[1] * 0.2):
+        # Si tiene 4 esquinas y es lo suficientemente grande, es nuestra hoja
+        if len(approx) == 4 and cv2.contourArea(c) > (img.shape[0] * img.shape[1] * 0.3):
             screenCnt = approx
             break
             
-    # 4. RECORTE GEOMÉTRICO (Si lo encuentra, se encuadra perfecto)
+    # 4. Hacer el recorte si se detectó el marco
     if screenCnt is not None:
         pts = screenCnt.reshape(4, 2)
         rect = np.zeros((4, 2), dtype="float32")
@@ -96,14 +93,15 @@ def aplicar_filtro_escaneo(image_bytes):
         hoja_recortada = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     else:
-        # PLAN B INMANIBLE: Si el entorno es demasiado hostil, aplica un recorte de emergencia 
-        # quitando el 6% de los bordes para asegurar que no se guarde la mesa ni el periódico grueso
+        # PLAN B AUTOMÁTICO: Si el fondo es demasiado ruidoso, recorta un 7% fijo de los bordes
+        # para asegurar que tire a la basura la mesa y el periódico superior/inferior.
         h, w = img.shape[:2]
-        margin_h, margin_w = int(h * 0.06), int(w * 0.05)
+        margin_h = int(h * 0.07)
+        margin_w = int(w * 0.04)
         hoja_recortada = orig[margin_h:h-margin_h, margin_w:w-margin_w]
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
 
-    # 5. FILTRO DE LIMPIEZA SUAVE (El que te dejó las letras impecables)
+    # 5. Aplicar la limpieza suave que te dejó las letras legibles
     kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
     dilated_img = cv2.dilate(gray_final, kernel_clean)
     bg_img = cv2.medianBlur(dilated_img, 25)
@@ -115,7 +113,7 @@ def aplicar_filtro_escaneo(image_bytes):
     _, thresholded = cv2.threshold(normalized_img, 225, 255, cv2.THRESH_TRUNC)
     final_scanned = cv2.normalize(thresholded, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     
-    # 6. Guardar el resultado limpio
+    # 6. Convertir a bytes
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
