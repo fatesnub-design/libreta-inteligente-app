@@ -36,72 +36,41 @@ def aplicar_filtro_escaneo(image_bytes):
     # 1. Convertir bytes a formato OpenCV
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    orig = img.copy()
     
-    # 2. Convertir a gris y aplicar un filtro fuerte para borrar las letras del periódico
+    # 2. Convertir a escala de grises y aplicar un desenfoque para eliminar ruido pequeño
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (9, 9), 0)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # Binarización estricta: todo lo que sea muy oscuro (el marco negro) se vuelve blanco puro,
-    # y el periódico/mesa se vuelven negros. Así aislamos el recuadro.
-    _, thresh = cv2.threshold(blurred, 80, 255, cv2.THRESH_BINARY_INV)
+    # 3. RECORTE ROBUSTO POR LÍMITES DE COLOR OSCURO
+    # Creamos una máscara binaria donde solo resalte el recuadro negro grueso de tu libreta
+    _, thresh_marco = cv2.threshold(blurred, 65, 255, cv2.THRESH_BINARY_INV)
     
-    # Limpiamos imperfecciones para cerrar el rectángulo si la sombra lo cortó
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    # Encontramos todos los puntos que pertenecen al marco negro de la libreta
+    puntos_oscuros = cv2.findNonZero(thresh_marco)
     
-    # 3. Buscar el contorno del recuadro de la libreta
-    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
-    
-    screenCnt = None
-    for c in cnts:
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        # Si tiene 4 esquinas y es lo suficientemente grande, es nuestra hoja
-        if len(approx) == 4 and cv2.contourArea(c) > (img.shape[0] * img.shape[1] * 0.3):
-            screenCnt = approx
-            break
-            
-    # 4. Hacer el recorte si se detectó el marco
-    if screenCnt is not None:
-        pts = screenCnt.reshape(4, 2)
-        rect = np.zeros((4, 2), dtype="float32")
-        s = pts.sum(axis=1)
-        rect[0] = pts[np.argmin(s)]
-        rect[2] = pts[np.argmax(s)]
-        diff = np.diff(pts, axis=1)
-        rect[1] = pts[np.argmin(diff)]
-        rect[3] = pts[np.argmax(diff)]
+    if puntos_oscuros is not None:
+        # Obtenemos la caja delimitadora exacta que encierra el recuadro negro
+        x, y, w, h = cv2.boundingRect(puntos_oscuros)
         
-        (tl, tr, br, bl) = rect
-        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-        maxWidth = max(int(widthA), int(widthB))
+        # Añadimos un pequeño margen de seguridad de 5 píxeles para no cortar el marco
+        h_img, w_img = img.shape[:2]
+        x_min = max(0, x - 5)
+        y_min = max(0, y - 5)
+        x_max = min(w_img, x + w + 5)
+        y_max = min(h_img, y + h + 5)
         
-        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-        maxHeight = max(int(heightA), int(heightB))
-        
-        dst = np.array([
-            [0, 0],
-            [maxWidth - 1, 0],
-            [maxWidth - 1, maxHeight - 1],
-            [0, maxHeight - 1]], dtype="float32")
-            
-        M = cv2.getPerspectiveTransform(rect, dst)
-        hoja_recortada = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
+        # Realizamos el recorte forzado eliminando la mesa y el periódico
+        hoja_recortada = img[y_min:y_max, x_min:x_max]
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     else:
-        # PLAN B AUTOMÁTICO: Si el fondo es demasiado ruidoso, recorta un 7% fijo de los bordes
-        # para asegurar que tire a la basura la mesa y el periódico superior/inferior.
-        h, w = img.shape[:2]
-        margin_h = int(h * 0.07)
-        margin_w = int(w * 0.04)
-        hoja_recortada = orig[margin_h:h-margin_h, margin_w:w-margin_w]
+        # Plan B estricto si la imagen falla por completo
+        h_img, w_img = img.shape[:2]
+        margin_h = int(h_img * 0.08)
+        margin_w = int(w_img * 0.05)
+        hoja_recortada = img[margin_h:h_img-margin_h, margin_w:w_img-margin_w]
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
 
-    # 5. Aplicar la limpieza suave que te dejó las letras legibles
+    # 4. FILTRO DE LIMPIEZA SUAVE (Mantiene tus letras perfectas sobre blanco puro)
     kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
     dilated_img = cv2.dilate(gray_final, kernel_clean)
     bg_img = cv2.medianBlur(dilated_img, 25)
@@ -113,7 +82,7 @@ def aplicar_filtro_escaneo(image_bytes):
     _, thresholded = cv2.threshold(normalized_img, 225, 255, cv2.THRESH_TRUNC)
     final_scanned = cv2.normalize(thresholded, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     
-    # 6. Convertir a bytes
+    # 5. Guardar y enviar de vuelta en bytes
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
