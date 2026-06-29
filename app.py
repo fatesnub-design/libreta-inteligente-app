@@ -1,6 +1,8 @@
 import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
 
 # 1. Definimos la función primero (sin ejecutarla)
 def get_oauth_flow():
@@ -61,4 +63,35 @@ if "credentials" not in st.session_state:
     st.markdown(f'[Haz clic aquí para conectar tu Google Drive]({auth_url})')
 else:
     st.success("¡Conectado a tu cuenta!")
-    # Aquí iría tu lógica de tu app principal...
+    st.header("Subir nuevo escaneo")
+archivo_subido = st.file_uploader("Elige una foto o PDF de tu libreta", type=["png", "jpg", "jpeg", "pdf"])
+
+if archivo_subido is not None:
+    if st.button("Guardar en Google Drive"):
+        try:
+            # 1. Usamos las credenciales almacenadas con éxito en tu session_state
+            creds = st.session_state["credentials"]
+            service = build('drive', 'v3', credentials=creds)
+            
+            # 2. Preparamos los metadatos del archivo
+            file_metadata = {'name': archivo_subido.name}
+            
+            # 3. Convertimos el archivo subido a un formato que Google Drive entienda
+            media = MediaIoBaseUpload(
+                io.BytesIO(archivo_subido.read()), 
+                mimetype=archivo_subido.type, 
+                resumable=True
+            )
+            
+            # 4. Subimos el archivo a la nube
+            file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+            
+            st.success(f"¡Archivo guardado con éxito! ID en Drive: {file.get('id')}")
+            
+        except Exception as e:
+            st.error(f"Hubo un problema al subir el archivo: {e}")..
+
