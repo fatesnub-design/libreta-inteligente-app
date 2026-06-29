@@ -2,7 +2,7 @@ import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image
 from skimage.filters import threshold_local
 import numpy as np
 import io
@@ -36,41 +36,56 @@ def aplicar_filtro_escaneo(image_bytes):
     # 1. Convertir bytes a formato OpenCV
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    orig = img.copy()
     
-    # 2. Convertir a escala de grises y aplicar un desenfoque para eliminar ruido pequeño
+    # 2. Preprocesamiento enfocado en estructuras grandes
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     
-    # 3. RECORTE ROBUSTO POR LÍMITES DE COLOR OSCURO
-    # Creamos una máscara binaria donde solo resalte el recuadro negro grueso de tu libreta
-    _, thresh_marco = cv2.threshold(blurred, 65, 255, cv2.THRESH_BINARY_INV)
+    # Umbralizado adaptativo para resaltar el contorno grueso del marco
+    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                   cv2.THRESH_BINARY_INV, 21, 5)
     
-    # Encontramos todos los puntos que pertenecen al marco negro de la libreta
-    puntos_oscuros = cv2.findNonZero(thresh_marco)
+    # 3. FILTRADO RECTANGULAR POR ÁREA (Aquí destruimos el periódico)
+    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    if puntos_oscuros is not None:
-        # Obtenemos la caja delimitadora exacta que encierra el recuadro negro
-        x, y, w, h = cv2.boundingRect(puntos_oscuros)
+    h_img, w_img = img.shape[:2]
+    area_total = h_img * w_img
+    
+    x_final, y_final, w_final, h_final = None, None, None, None
+    max_area = 0
+    
+    for c in cnts:
+        # Obtenemos la caja de cada contorno detectado
+        x, y, w, h = cv2.boundingRect(c)
+        area_c = w * h
         
-        # Añadimos un pequeño margen de seguridad de 5 píxeles para no cortar el marco
-        h_img, w_img = img.shape[:2]
-        x_min = max(0, x - 5)
-        y_min = max(0, y - 5)
-        x_max = min(w_img, x + w + 5)
-        y_max = min(h_img, y + h + 5)
+        # El marco de la libreta DEBE ser grande (más del 35% de la foto) 
+        # pero menor que la imagen completa (para no agarrar el borde de la foto)
+        if area_c > (area_total * 0.35) and area_c < (area_total * 0.98):
+            if area_c > max_area:
+                max_area = area_c
+                x_final, y_final, w_final, h_final = x, y, w, h
+
+    # 4. EJECUTAR EL RECORTE
+    if x_final is not None:
+        # Ajustamos un margen interno de 8 píxeles para limpiar el borde negro exterior si queda chueco
+        x_min = max(0, x_final + 8)
+        y_min = max(0, y_final + 8)
+        x_max = min(w_img, x_final + w_final - 8)
+        y_max = min(h_img, y_final + h_final - 8)
         
-        # Realizamos el recorte forzado eliminando la mesa y el periódico
-        hoja_recortada = img[y_min:y_max, x_min:x_max]
+        hoja_recortada = orig[y_min:y_max, x_min:x_max]
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     else:
-        # Plan B estricto si la imagen falla por completo
-        h_img, w_img = img.shape[:2]
-        margin_h = int(h_img * 0.08)
-        margin_w = int(w_img * 0.05)
-        hoja_recortada = img[margin_h:h_img-margin_h, margin_w:w_img-margin_w]
+        # PLAN B INVISIBLE: Si por la luz extrema no se halló la caja gigante, 
+        # rebanamos rígidamente un 9% superior/inferior para asegurar que se vaya el periódico.
+        margin_h = int(h_img * 0.09)
+        margin_w = int(w_img * 0.04)
+        hoja_recortada = orig[margin_h:h_img-margin_h, margin_w:w_img-margin_w]
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
 
-    # 4. FILTRO DE LIMPIEZA SUAVE (Mantiene tus letras perfectas sobre blanco puro)
+    # 5. FILTRO DE LIMPIEZA SUAVE (El que ya te dejó el texto perfecto)
     kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
     dilated_img = cv2.dilate(gray_final, kernel_clean)
     bg_img = cv2.medianBlur(dilated_img, 25)
@@ -82,7 +97,7 @@ def aplicar_filtro_escaneo(image_bytes):
     _, thresholded = cv2.threshold(normalized_img, 225, 255, cv2.THRESH_TRUNC)
     final_scanned = cv2.normalize(thresholded, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     
-    # 5. Guardar y enviar de vuelta en bytes
+    # 6. Guardar y enviar de vuelta en bytes
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
