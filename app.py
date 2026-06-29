@@ -93,5 +93,5 @@ if archivo_subido is not None:
             st.success(f"¡Archivo guardado con éxito! ID en Drive: {file.get('id')}")
             
         except Exception as e:
-            st.error(f"Hubo un problema al subir el archivo: {e}")..
+            st.error(f"Hubo un problema al subir el archivo: {e}")
 
