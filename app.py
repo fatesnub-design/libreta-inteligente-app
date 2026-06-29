@@ -22,28 +22,27 @@ def get_oauth_flow():
     return flow
 
 # --- Lógica de Captura del Token ---
-query_params = st.query_params
-code = query_params.get("code")
-
-if code and "credentials" not in st.session_state:
-    try:
-        flow = get_oauth_flow()
-        
-        # AQUÍ ESTÁ EL CAMBIO: 
-        # Forzamos la obtención del token pasando el código directamente 
-        # y eliminando la dependencia de estados previos que fallan.
-        flow.fetch_token(code=code, include_client_id=True)
-        
-        st.session_state["credentials"] = flow.credentials
-        
-        # Limpiamos los parámetros para que la URL se vea limpia
-        st.query_params.clear()
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"Error al obtener el token: {e}")
-        # Si falla, limpiamos para permitir reintento
-        st.query_params.clear()
+# --- Interfaz de Autenticación ---
+if "credentials" not in st.session_state:
+    flow = get_oauth_flow()
+    auth_url, _ = flow.authorization_url(prompt='select_account')
+    
+    st.markdown(f"[Haz clic aquí para obtener tu código]({auth_url})")
+    
+    # Campo para pegar el código
+    codigo = st.text_input("4/1AdkVLPyRYwxXCh2bayJGv0oOGlNCrJJTavs9zFLkURpXet8gf8Bjrhe_MJg")
+    
+    if st.button("Conectar"):
+        try:
+            flow.fetch_token(code=codigo)
+            st.session_state["credentials"] = flow.credentials
+            st.success("¡Conectado exitosamente!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al conectar: {e}")
+else:
+    st.success("¡Ya estás conectado a tu Google Drive!")
+    # Aquí ya puedes poner tu lógica para subir archivos
 
 # 3. Interfaz de usuario
 st.title("📝 Mi Libreta Inteligente")
