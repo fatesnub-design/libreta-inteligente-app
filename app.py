@@ -25,32 +25,31 @@ def get_oauth_flow():
     return flow
 
 # --- Lógica de Captura del Token ---
-# --- Interfaz de Autenticación ---
+# --- Lógica de Autenticación Definitiva ---
 if "credentials" not in st.session_state:
-    flow = get_oauth_flow()
+    
+    # Si el botón de conectar no se ha tocado, creamos el flujo inicial
+    if "oauth_flow" not in st.session_state:
+        st.session_state["oauth_flow"] = get_oauth_flow()
+        
+    # Usamos SIEMPRE el mismo objeto de la sesión para que no pierda el PKCE
+    flow = st.session_state["oauth_flow"]
     auth_url, _ = flow.authorization_url(prompt='select_account')
     
     st.markdown(f"[Haz clic aquí para obtener tu código]({auth_url})")
-    
-    # Campo para pegar el código
     codigo = st.text_input("Pega aquí el código que te dio Google:")
     
     if st.button("Conectar"):
         try:
-            flow = get_oauth_flow() # Re-instanciamos
-            flow.code_verifier = None # Aseguramos que sea None
-            
-            # Canjeamos el token
-            flow.fetch_token(code=codigo)
-            
-            st.session_state["credentials"] = flow.credentials
+            # Usamos el flujo guardado en memoria que SÍ tiene el verifier original
+            st.session_state["oauth_flow"].fetch_token(code=codigo)
+            st.session_state["credentials"] = st.session_state["oauth_flow"].credentials
             st.success("¡Conectado exitosamente!")
             st.rerun()
         except Exception as e:
             st.error(f"Error al conectar: {e}")
-else:
-    st.success("¡Ya estás conectado a tu Google Drive!")
-    # Aquí ya puedes poner tu lógica para subir archivos
+            # Si falló, borramos el flujo viejo para generar uno limpio al recargar
+            del st.session_state["oauth_flow"]
 
 # 3. Interfaz de usuario
 st.title("📝 Mi Libreta Inteligente")
