@@ -37,32 +37,31 @@ def aplicar_filtro_escaneo(image_bytes):
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
-    # 2. RECORTE FORZADO DE BORDES (Elimina un 8% de cada orilla automáticamente)
-    # Esto borra el periódico de abajo y la mesa de arriba directo en el código
-    h, w = img.shape[:2]
-    margin_h = int(h * 0.08)  # Ajusta este número si quieres cortar más arriba/abajo
-    margin_w = int(w * 0.05)  # Ajusta este número si quieres cortar más a los lados
+    # 2. Preprocesamiento: Convertir a escala de grises y reducir ruido
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Cortamos la imagen para quedarnos solo con el centro (la libreta)
-    img_cropped = img[margin_h:h-margin_h, margin_w:w-margin_w]
+    # Suavizado para reducir ruido y mejorar los bordes del texto manuscrito
+    # Un filtro Gaussiano suave es clave antes de binarizar
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # 3. Convertir a gris para limpiar
-    gray = cv2.cvtColor(img_cropped, cv2.COLOR_BGR2GRAY)
+    # 3. FILTRO CLAVE: Umbral Adaptativo Avanzado
+    # Analiza bloques locales de la imagen para determinar el umbral óptimo en cada punto.
+    # Esto elimina sombras grandes y preserva el texto manuscrito.
+    # Ajustamos 'block_size' y 'C' para un equilibrio perfecto entre limpieza y legibilidad.
+    block_size = 135 # Tamaño del bloque de análisis. Auméntalo para más limpieza, disminúyelo para más detalle.
+    C = 12          # Constante que se resta de la media. Ajusta la "agresividad" del blanqueado.
     
-    # 4. FILTRO DE LIMPIEZA EQUILIBRADO
-    # Usamos la división de fondo pero sobre el área ya recortada
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
-    dilated_img = cv2.dilate(gray, kernel)
-    bg_img = cv2.medianBlur(dilated_img, 31)
+    thresholded = cv2.adaptiveThreshold(
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY, block_size, C
+    )
     
-    diff_img = cv2.absdiff(gray, bg_img)
-    diff_img = 255 - diff_img
+    # 4. Post-procesamiento opcional: Pequeño "limpiado" de ruido adicional
+    # Usamos morfología matemática para eliminar puntitos negros sueltos
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+    final_scanned = cv2.morphologyEx(thresholded, cv2.MORPH_OPEN, kernel)
     
-    # Aumentamos el contraste final para que las letras se marquen bien oscuras
-    normalized_img = cv2.normalize(diff_img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    _, final_scanned = cv2.threshold(normalized_img, 220, 255, cv2.THRESH_BINARY) 
-
-    # 5. Convertir de vuelta a bytes para guardar en Drive
+    # 5. Convertir de vuelta a bytes para Google Drive
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
