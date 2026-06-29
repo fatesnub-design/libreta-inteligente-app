@@ -2,7 +2,7 @@ import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps
 import numpy as np
 import io
 
