@@ -33,64 +33,36 @@ def get_oauth_flow():
 # 2. 
 # --- Función de Filtro de Escaneo Mejorada ---
 def aplicar_filtro_escaneo(image_bytes):
-    # 1. Convertir bytes a OpenCV
+    # 1. Convertir bytes a formato OpenCV
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    orig = img.copy()
     
     h_img, w_img = img.shape[:2]
     
-    # 2. DETECCIÓN Y RECORTE HÍBRIDO (Eliminar periódico y mesa)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY_INV, 21, 5)
+    # 2. RECORTE FORZADO ASIMÉTRICO (Elimina periódico superior y mesa inferior directo)
+    margin_top = int(h_img * 0.09)     # Rebaña el periódico de arriba
+    margin_bottom = int(h_img * 0.08)  # Rebaña la mesa de abajo
+    margin_sides = int(w_img * 0.04)   # Rebaña los costados
+    hoja_recortada = img[margin_top:h_img-margin_bottom, margin_sides:w_img-margin_sides]
     
-    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    area_total = h_img * w_img
+    # 3. CONVERSIÓN Y MEJORA DE CONTRASTE (Para fotos oscuras)
+    gray = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     
-    x_final, y_final, w_final, h_final = None, None, None, None
-    max_area = 0
+    # CLAHE ecualiza el contraste por secciones para rescatar el lápiz en zonas oscuras
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    contrast_enhanced = clahe.apply(gray)
     
-    for c in cnts:
-        x, y, w, h = cv2.boundingRect(c)
-        area_c = w * h
-        # Buscamos un recuadro grande que corresponda a la libreta
-        if area_c > (area_total * 0.40) and area_c < (area_total * 0.98):
-            if area_c > max_area:
-                max_area = area_c
-                x_final, y_final, w_final, h_final = x, y, w, h
-
-    # Ejecutar el recorte basado en si se encontró el marco o de forma fija
-    if x_final is not None:
-        # Margen interno para limpiar imperfecciones del borde exterior
-        x_min = max(0, x_final + 10)
-        y_min = max(0, y_final + 15)
-        x_max = min(w_img, x_final + w_final - 10)
-        y_max = min(h_img, y_final + h_final - 15)
-        hoja_recortada = orig[y_min:y_max, x_min:x_max]
-    else:
-        # PLAN B ESTRICTO: Rebanado directo para tirar periódico superior y mesa inferior
-        margin_top = int(h_img * 0.09)     # Quita el periódico de arriba
-        margin_bottom = int(h_img * 0.08)  # Quita la mesa de abajo
-        margin_sides = int(w_img * 0.04)   # Quita los lados
-        hoja_recortada = orig[margin_top:h_img-margin_bottom, margin_sides:w_img-margin_sides]
-
-    # 3. FILTRO DE RESCATE PARA LÁPIZ Y TEXTO TENUE
-    # Pasamos la hoja recortada a gris
-    gray_recortada = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
+    # 4. FILTRO DE BLANQUEADO DE HOJA (Preserva trazos delgados)
+    # Usamos un suavizado bilateral para limpiar el ruido del papel sin borrar el lápiz
+    filtered = cv2.bilateralFilter(contrast_enhanced, 11, 75, 75)
     
-    # El filtro bilateral reduce el ruido de fondo (sombras) pero preserva los bordes del lápiz
-    filtered = cv2.bilateralFilter(gray_recortada, 9, 75, 75)
-    
-    # Umbral adaptativo binario: analiza vecindarios pequeños (bloques de 25 píxeles)
-    # Esto rescata el lápiz porque detecta el contraste local en lugar del brillo global
+    # Binarización adaptativa con un bloque más grande (51) para evitar que el texto se pixele
     final_scanned = cv2.adaptiveThreshold(
         filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY, 25, 9
+        cv2.THRESH_BINARY, 51, 10
     )
     
-    # 4. Convertir de vuelta a bytes para guardar en Drive
+    # 5. Convertir de vuelta a bytes para Google Drive
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
