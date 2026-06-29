@@ -2,6 +2,9 @@ import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+from PIL import Image, ImageEnhance
+from skimage.filters import threshold_local
+import numpy as np
 import io
 
 # 1. Definimos la función primero (sin ejecutarla)
@@ -26,7 +29,30 @@ def get_oauth_flow():
     flow.code_verifier = None
     return flow
 
-# --- Lógica de Captura del Token ---
+# 2. FUNCIÓN DE FILTRO DE ESCANEO (La nueva para limpiar la foto)
+def aplicar_filtro_escaneo(image_bytes):
+    img = Image.open(io.BytesIO(image_bytes))
+    
+    # Subimos contraste para marcar más las letras
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.5) 
+    
+    # Convertimos a escala de grises
+    image_gray = np.array(img.convert('L'))
+    
+    # Umbral adaptativo para volar sombras (bloque de 51 es ideal para tu foto)
+    block_size = 51 
+    adaptive_threshold = threshold_local(image_gray, block_size, offset=15)
+    
+    # Fondo blanco (255) y texto negro (0)
+    binary_image = (image_gray > adaptive_threshold).astype(np.uint8) * 255
+    
+    cleaned_img = Image.fromarray(binary_image)
+    
+    buffered = io.BytesIO()
+    cleaned_img.save(buffered, format="JPEG", quality=90)
+    return buffered.getvalue()
+
 # --- Lógica de Autenticación Definitiva ---
 if "credentials" not in st.session_state:
     
@@ -63,35 +89,44 @@ if "credentials" not in st.session_state:
     st.markdown(f'[Haz clic aquí para conectar tu Google Drive]({auth_url})')
 else:
     st.success("¡Conectado a tu cuenta!")
-    st.header("Subir nuevo escaneo")
-archivo_subido = st.file_uploader("Elige una foto o PDF de tu libreta", type=["png", "jpg", "jpeg", "pdf"])
-
-if archivo_subido is not None:
-    if st.button("Guardar en Google Drive"):
-        try:
-            # 1. Usamos las credenciales almacenadas con éxito en tu session_state
-            creds = st.session_state["credentials"]
-            service = build('drive', 'v3', credentials=creds)
-            
-            # 2. Preparamos los metadatos del archivo
-            file_metadata = {'name': archivo_subido.name}
-            
-            # 3. Convertimos el archivo subido a un formato que Google Drive entienda
-            media = MediaIoBaseUpload(
-                io.BytesIO(archivo_subido.read()), 
-                mimetype=archivo_subido.type, 
-                resumable=True
-            )
-            
-            # 4. Subimos el archivo a la nube
-            file = service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
-            
-            st.success(f"¡Archivo guardado con éxito! ID en Drive: {file.get('id')}")
-            
-        except Exception as e:
-            st.error(f"Hubo un problema al subir el archivo: {e}")
+    st.header("Subir nuevo escaneo inteligente")
+    
+    archivo_subido = st.file_uploader("Elige una foto de tu libreta", type=["png", "jpg", "jpeg"])
+    
+    if archivo_subido is not None:
+        original_bytes = archivo_subido.read()
+        
+        # Muestra la foto que me mandaste tal cual
+        st.image(original_bytes, caption="Foto Original", use_container_width=True)
+        
+        if st.button("Procesar y Guardar en Google Drive"):
+            with st.spinner("Procesando filtros de escaneo y subiendo..."):
+                try:
+                    # Aplica la limpieza
+                    imagen_limpia_bytes = aplicar_filtro_escaneo(original_bytes)
+                    
+                    # Te muestra el resultado limpio en la pantalla
+                    st.image(imagen_limpia_bytes, caption="Resultado del Escaneo Limpio", use_container_width=True)
+                    
+                    # Sube el archivo limpio a Drive
+                    creds = st.session_state["credentials"]
+                    service = build('drive', 'v3', credentials=creds)
+                    
+                    file_metadata = {'name': f"Escaneo_{archivo_subido.name}"}
+                    media = MediaIoBaseUpload(
+                        io.BytesIO(imagen_limpia_bytes), 
+                        mimetype='image/jpeg', 
+                        resumable=True
+                    )
+                    
+                    file = service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id'
+                    ).execute()
+                    
+                    st.success(f"¡Escaneo guardado con éxito! ID en Drive: {file.get('id')}")
+                    
+                except Exception as e:
+                    st.error(f"Hubo un error al procesar o subir: {e}")
 
