@@ -6,6 +6,7 @@ from PIL import Image, ImageEnhance, ImageOps
 from skimage.filters import threshold_local
 import numpy as np
 import io
+import cv2
 
 # 1. Definimos la función primero (sin ejecutarla)
 def get_oauth_flow():
@@ -32,30 +33,72 @@ def get_oauth_flow():
 # 2. 
 # --- Función de Filtro de Escaneo Mejorada ---
 def aplicar_filtro_escaneo(image_bytes):
-    # 1. Abrir la imagen original
-    img = Image.open(io.BytesIO(image_bytes))
+    # 1. Convertir bytes a formato OpenCV
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    orig = img.copy()
     
-    # 2. Convertir a escala de grises y mejorar contraste inicial
-    img_gray = img.convert('L')
-    img_gray = ImageEnhance.Contrast(img_gray).enhance(2.0)
+    # 2. Preprocesar para buscar el contorno de la hoja
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(blurred, 75, 200)
     
-    # Convertimos a formato numérico para procesar píxeles
-    image_np = np.array(img_gray)
+    # Buscar contornos
+    cnts, _ = cv2.findContours(edged.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
     
-    # 3. FILTRO CLAVE: Aumentamos el bloque a 101 o más.
-    # Un bloque gigante (151) permite identificar sombras enormes de celulares
-    # y borrarlas sin destruir las letras pequeñas.
-    block_size = 151 
-    adaptive_threshold = threshold_local(image_np, block_size, offset=12)
+    screenCnt = None
+    for c in cnts:
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        # Si el contorno tiene 4 puntos, encontramos la hoja
+        if len(approx) == 4:
+            screenCnt = approx
+            break
+            
+    # 3. Si encontramos la hoja, la recortamos y enderezamos
+    if screenCnt is not None:
+        # Reordenar puntos del contorno
+        pts = screenCnt.reshape(4, 2)
+        rect = np.zeros((4, 2), dtype="float32")
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)]
+        rect[2] = pts[np.argmax(s)]
+        diff = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(diff)]
+        rect[3] = pts[np.argmax(diff)]
+        
+        (tl, tr, br, bl) = rect
+        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+        maxWidth = max(int(widthA), int(widthB))
+        
+        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+        maxHeight = max(int(heightA), int(heightB))
+        
+        dst = np.array([
+            [0, 0],
+            [maxWidth - 1, 0],
+            [maxWidth - 1, maxHeight - 1],
+            [0, maxHeight - 1]], dtype="float32")
+            
+        M = cv2.getPerspectiveTransform(rect, dst)
+        warped = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
+        final_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+    else:
+        # Si no detecta el contorno, usamos la imagen completa en gris
+        final_gray = gray
+
+    # 4. Filtro de estilo Escáner Suave (Evita píxeles mordidos)
+    # En lugar de blanco y negro puro, suavizamos con un umbral gaussiano
+    scanned = cv2.adaptiveThreshold(
+        final_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY, 115, 15
+    )
     
-    # Creamos la máscara binaria pura para limpiar el fondo
-    binary_mask = (image_np > adaptive_threshold).astype(np.uint8) * 255
-    
-    # 4. Suavizado para que las letras no se vean con "puntos mordidos"
-    cleaned_img = Image.fromarray(binary_mask)
-    cleaned_img = ImageOps.autocontrast(cleaned_img, cutoff=1)
-    
-    # 5. Guardar el archivo final
+    # 5. Convertir de vuelta a PIL y luego a bytes para Drive
+    cleaned_img = Image.fromarray(scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
     return buffered.getvalue()
