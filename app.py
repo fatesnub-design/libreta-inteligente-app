@@ -33,71 +33,64 @@ def get_oauth_flow():
 # 2. 
 # --- Función de Filtro de Escaneo Mejorada ---
 def aplicar_filtro_escaneo(image_bytes):
-    # 1. Convertir bytes a formato OpenCV
+    # 1. Convertir bytes a OpenCV
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     orig = img.copy()
     
-    # 2. Preprocesamiento enfocado en estructuras grandes
+    h_img, w_img = img.shape[:2]
+    
+    # 2. DETECCIÓN Y RECORTE HÍBRIDO (Eliminar periódico y mesa)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-    
-    # Umbralizado adaptativo para resaltar el contorno grueso del marco
     thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                    cv2.THRESH_BINARY_INV, 21, 5)
     
-    # 3. FILTRADO RECTANGULAR POR ÁREA (Aquí destruimos el periódico)
     cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    h_img, w_img = img.shape[:2]
     area_total = h_img * w_img
     
     x_final, y_final, w_final, h_final = None, None, None, None
     max_area = 0
     
     for c in cnts:
-        # Obtenemos la caja de cada contorno detectado
         x, y, w, h = cv2.boundingRect(c)
         area_c = w * h
-        
-        # El marco de la libreta DEBE ser grande (más del 35% de la foto) 
-        # pero menor que la imagen completa (para no agarrar el borde de la foto)
-        if area_c > (area_total * 0.35) and area_c < (area_total * 0.98):
+        # Buscamos un recuadro grande que corresponda a la libreta
+        if area_c > (area_total * 0.40) and area_c < (area_total * 0.98):
             if area_c > max_area:
                 max_area = area_c
                 x_final, y_final, w_final, h_final = x, y, w, h
 
-    # 4. EJECUTAR EL RECORTE
+    # Ejecutar el recorte basado en si se encontró el marco o de forma fija
     if x_final is not None:
-        # Ajustamos un margen interno de 8 píxeles para limpiar el borde negro exterior si queda chueco
-        x_min = max(0, x_final + 8)
-        y_min = max(0, y_final + 8)
-        x_max = min(w_img, x_final + w_final - 8)
-        y_max = min(h_img, y_final + h_final - 8)
-        
+        # Margen interno para limpiar imperfecciones del borde exterior
+        x_min = max(0, x_final + 10)
+        y_min = max(0, y_final + 15)
+        x_max = min(w_img, x_final + w_final - 10)
+        y_max = min(h_img, y_final + h_final - 15)
         hoja_recortada = orig[y_min:y_max, x_min:x_max]
-        gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     else:
-        # PLAN B INVISIBLE: Si por la luz extrema no se halló la caja gigante, 
-        # rebanamos rígidamente un 9% superior/inferior para asegurar que se vaya el periódico.
-        margin_h = int(h_img * 0.09)
-        margin_w = int(w_img * 0.04)
-        hoja_recortada = orig[margin_h:h_img-margin_h, margin_w:w_img-margin_w]
-        gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
+        # PLAN B ESTRICTO: Rebanado directo para tirar periódico superior y mesa inferior
+        margin_top = int(h_img * 0.09)     # Quita el periódico de arriba
+        margin_bottom = int(h_img * 0.08)  # Quita la mesa de abajo
+        margin_sides = int(w_img * 0.04)   # Quita los lados
+        hoja_recortada = orig[margin_top:h_img-margin_bottom, margin_sides:w_img-margin_sides]
 
-    # 5. FILTRO DE LIMPIEZA SUAVE (El que ya te dejó el texto perfecto)
-    kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
-    dilated_img = cv2.dilate(gray_final, kernel_clean)
-    bg_img = cv2.medianBlur(dilated_img, 25)
+    # 3. FILTRO DE RESCATE PARA LÁPIZ Y TEXTO TENUE
+    # Pasamos la hoja recortada a gris
+    gray_recortada = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     
-    diff_img = cv2.absdiff(gray_final, bg_img)
-    diff_img = 255 - diff_img
-    normalized_img = cv2.normalize(diff_img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    # El filtro bilateral reduce el ruido de fondo (sombras) pero preserva los bordes del lápiz
+    filtered = cv2.bilateralFilter(gray_recortada, 9, 75, 75)
     
-    _, thresholded = cv2.threshold(normalized_img, 225, 255, cv2.THRESH_TRUNC)
-    final_scanned = cv2.normalize(thresholded, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    # Umbral adaptativo binario: analiza vecindarios pequeños (bloques de 25 píxeles)
+    # Esto rescata el lápiz porque detecta el contraste local en lugar del brillo global
+    final_scanned = cv2.adaptiveThreshold(
+        filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY, 25, 9
+    )
     
-    # 6. Guardar y enviar de vuelta en bytes
+    # 4. Convertir de vuelta a bytes para guardar en Drive
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
