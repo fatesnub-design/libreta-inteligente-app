@@ -65,7 +65,8 @@ def aplicar_filtro_escaneo(image_bytes):
     # 5. Guardar y retornar el resultado nítido en bytes
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
-    cleaned_img.save(buffered, form
+    cleaned_img.save(buffered, format="JPEG", quality=95)
+    return buffered.getvalue()
 
 # --- Lógica de Autenticación Definitiva ---
 if "credentials" not in st.session_state:
