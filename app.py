@@ -3,7 +3,6 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from PIL import Image, ImageEnhance
-from skimage.filters import threshold_local
 import numpy as np
 import io
 
@@ -29,28 +28,26 @@ def get_oauth_flow():
     flow.code_verifier = None
     return flow
 
-# 2. FUNCIÓN DE FILTRO DE ESCANEO (La nueva para limpiar la foto)
+# 2. 
+# --- Función de Filtro de Escaneo Mejorada ---
 def aplicar_filtro_escaneo(image_bytes):
+    # 1. Abrir la imagen
     img = Image.open(io.BytesIO(image_bytes))
     
-    # Subimos contraste para marcar más las letras
-    enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(1.5) 
+    # 2. Pre-procesado: Aumentamos contraste y brillo para "blanquear" el fondo
+    img = ImageEnhance.Contrast(img).enhance(1.8) # Sube contraste
+    img = ImageEnhance.Brightness(img).enhance(1.1) # Sube brillo suavemente
+
+    # 3. Convertir a escala de grises
+    image_gray = img.convert('L')
     
-    # Convertimos a escala de grises
-    image_gray = np.array(img.convert('L'))
+    # 4. Ajuste automático de curvas (para marcar el negro y blanquear el gris)
+    # Esto simula un escáner y es mucho menos agresivo que el umbral adaptativo.
+    image_final = ImageOps.autocontrast(image_gray, cutoff=2)
     
-    # Umbral adaptativo para volar sombras (bloque de 51 es ideal para tu foto)
-    block_size = 51 
-    adaptive_threshold = threshold_local(image_gray, block_size, offset=15)
-    
-    # Fondo blanco (255) y texto negro (0)
-    binary_image = (image_gray > adaptive_threshold).astype(np.uint8) * 255
-    
-    cleaned_img = Image.fromarray(binary_image)
-    
+    # 5. Guardar en un buffer de bytes listo para Drive
     buffered = io.BytesIO()
-    cleaned_img.save(buffered, format="JPEG", quality=90)
+    image_final.save(buffered, format="JPEG", quality=95) # Calidad alta
     return buffered.getvalue()
 
 # --- Lógica de Autenticación Definitiva ---
