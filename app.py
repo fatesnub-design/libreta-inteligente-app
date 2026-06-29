@@ -38,29 +38,36 @@ def aplicar_filtro_escaneo(image_bytes):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     orig = img.copy()
     
-    # 2. Preprocesamiento para encontrar el contorno de la hoja
+    # 2. EL SECRETO PARA EL ENTORNO REAL: Aislamos el marco negro
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    # Detectar bordes con Canny
-    edged = cv2.Canny(blurred, 50, 150)
     
-    # Encontrar contornos
-    cnts, _ = cv2.findContours(edged.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    # Ordenar por tamaño y quedarnos con los 5 más grandes
+    # Aplicamos un desenfoque Gaussiano fuerte (11,11) para "borrar" las letras del periódico
+    # pero manteniendo visible el grueso marco negro de la libreta
+    blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+    
+    # Usamos un umbral adaptativo muy específico para pintar el marco negro puro
+    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                   cv2.THRESH_BINARY_INV, 51, 11)
+    
+    # Limpieza morfológica: Une líneas rotas por sombras y elimina puntitos sueltos
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    # 3. BUSCAR EL MARCO DE LA LIBRETA
+    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
     
     screenCnt = None
     for c in cnts:
         peri = cv2.arcLength(c, True)
         approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        # Si el contorno tiene 4 esquinas, es nuestra hoja
-        if len(approx) == 4:
+        # Buscamos una figura de 4 esquinas que ocupe un tamaño razonable en la foto
+        if len(approx) == 4 and cv2.contourArea(c) > (img.shape[0] * img.shape[1] * 0.2):
             screenCnt = approx
             break
             
-    # 3. Si encontramos la hoja, la recortamos y enderezamos
+    # 4. RECORTE GEOMÉTRICO (Si lo encuentra, se encuadra perfecto)
     if screenCnt is not None:
-        # Reordenar puntos del contorno
         pts = screenCnt.reshape(4, 2)
         rect = np.zeros((4, 2), dtype="float32")
         s = pts.sum(axis=1)
@@ -70,7 +77,6 @@ def aplicar_filtro_escaneo(image_bytes):
         rect[1] = pts[np.argmin(diff)]
         rect[3] = pts[np.argmax(diff)]
         
-        # Calcular dimensiones de la hoja
         (tl, tr, br, bl) = rect
         widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
         widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
@@ -80,35 +86,36 @@ def aplicar_filtro_escaneo(image_bytes):
         heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
         maxHeight = max(int(heightA), int(heightB))
         
-        # Definir puntos de destino para enderezar
         dst = np.array([
             [0, 0],
             [maxWidth - 1, 0],
             [maxWidth - 1, maxHeight - 1],
             [0, maxHeight - 1]], dtype="float32")
             
-        # Aplicar la transformación de perspectiva (el recorte mágico)
         M = cv2.getPerspectiveTransform(rect, dst)
         hoja_recortada = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
-        # Convertir a gris para el filtro final
         gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
     else:
-        # Si no detecta el contorno, usamos la imagen completa en gris
-        gray_final = gray
+        # PLAN B INMANIBLE: Si el entorno es demasiado hostil, aplica un recorte de emergencia 
+        # quitando el 6% de los bordes para asegurar que no se guarde la mesa ni el periódico grueso
+        h, w = img.shape[:2]
+        margin_h, margin_w = int(h * 0.06), int(w * 0.05)
+        hoja_recortada = orig[margin_h:h-margin_h, margin_w:w-margin_w]
+        gray_final = cv2.cvtColor(hoja_recortada, cv2.COLOR_BGR2GRAY)
 
-    # 4. APLICAR EL FILTRO DE LIMPIEZA SUAVE (Sobre la hoja ya recortada)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
-    dilated_img = cv2.dilate(gray_final, kernel)
-    bg_img = cv2.medianBlur(dilated_img, 21)
+    # 5. FILTRO DE LIMPIEZA SUAVE (El que te dejó las letras impecables)
+    kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    dilated_img = cv2.dilate(gray_final, kernel_clean)
+    bg_img = cv2.medianBlur(dilated_img, 25)
     
     diff_img = cv2.absdiff(gray_final, bg_img)
     diff_img = 255 - diff_img
     normalized_img = cv2.normalize(diff_img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     
-    _, thresholded = cv2.threshold(normalized_img, 230, 255, cv2.THRESH_TRUNC)
+    _, thresholded = cv2.threshold(normalized_img, 225, 255, cv2.THRESH_TRUNC)
     final_scanned = cv2.normalize(thresholded, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
     
-    # 5. Convertir de vuelta a bytes para Drive
+    # 6. Guardar el resultado limpio
     cleaned_img = Image.fromarray(final_scanned)
     buffered = io.BytesIO()
     cleaned_img.save(buffered, format="JPEG", quality=95)
