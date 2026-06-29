@@ -30,7 +30,7 @@ if "credentials" not in st.session_state:
     st.markdown(f"[Haz clic aquí para obtener tu código]({auth_url})")
     
     # Campo para pegar el código
-    codigo = st.text_input("4/1AdkVLPyRYwxXCh2bayJGv0oOGlNCrJJTavs9zFLkURpXet8gf8Bjrhe_MJg")
+    codigo = st.text_input("Pega aquí el código que te dio Google:")
     
     if st.button("Conectar"):
         try:
