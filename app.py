@@ -51,39 +51,41 @@ def cargar_lector_ocr():
 
 reader = cargar_lector_ocr()
 
-# --- Inicializar Variables de Sesión para las Materias ---
-# Creamos 6 espacios fijos que corresponden a las 6 filas/columnas de tu tabla de abajo
-if "mis_materias" not in st.session_state:
-    st.session_state["mis_materias"] = {
-        "Casilla 1": "Matemáticas",
-        "Casilla 2": "Física",
-        "Casilla 3": "Química",
-        "Casilla 4": "Historia",
-        "Casilla 5": "Programación",
-        "Casilla 6": "Inglés"
-    }
+# --- Inicializar Variables de Sesión para las Materias (Lista Dinámica) ---
+if "lista_materias" not in st.session_state:
+    # Empezamos con unas por defecto, pero ahora es una lista indexada
+    st.session_state["lista_materias"] = ["Matemáticas", "Física", "Química", "Personal / Notas"]
 
-# --- CONFIGURACIÓN DE MATERIAS EN LA BARRA LATERAL (SIDEBAR) ---
+# --- CONFIGURACIÓN DINÁMICA EN LA BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
-    st.header("⚙️ Configuración de Libreta")
-    st.write("Asigna qué materia corresponde a cada casilla de tu hoja impresa:")
+    st.header("⚙️ Configuración de Destinos")
+    st.write("Gestiona tus materias o carpetas en el orden de las casillas de tu hoja:")
     
-    # El usuario puede renombrar las materias previamente desde aquí
-    m1 = st.text_input("Casilla 1:", st.session_state["mis_materias"]["Casilla 1"])
-    m2 = st.text_input("Casilla 2:", st.session_state["mis_materias"]["Casilla 2"])
-    m3 = st.text_input("Casilla 3:", st.session_state["mis_materias"]["Casilla 3"])
-    m4 = st.text_input("Casilla 4:", st.session_state["mis_materias"]["Casilla 4"])
-    m5 = st.text_input("Casilla 5:", st.session_state["mis_materias"]["Casilla 5"])
-    m6 = st.text_input("Casilla 6:", st.session_state["mis_materias"]["Casilla 6"])
+    # 1. Formulario para añadir una nueva materia
+    nueva_materia = st.text_input("Añadir nueva materia o sección:")
+    if st.button("➕ Agregar a la Libreta"):
+        if nueva_materia.strip() != "":
+            if nueva_materia.strip() not in st.session_state["lista_materias"]:
+                st.session_state["lista_materias"].append(nueva_materia.strip())
+                st.success(f"¡'{nueva_materia}' agregada!")
+                st.rerun()
+            else:
+                st.warning("Ese destino ya existe en la lista.")
+
+    st.write("---")
+    st.subheader("📋 Mapeo de Casillas Actuales")
     
-    if st.button("Guardar Materias"):
-        st.session_state["mis_materias"]["Casilla 1"] = m1
-        st.session_state["mis_materias"]["Casilla 2"] = m2
-        st.session_state["mis_materias"]["Casilla 3"] = m3
-        st.session_state["mis_materias"]["Casilla 4"] = m4
-        st.session_state["mis_materias"]["Casilla 5"] = m5
-        st.session_state["mis_materias"]["Casilla 6"] = m6
-        st.success("¡Materias sincronizadas!")
+    # 2. Mostrar la lista con el número de casilla correspondiente
+    if st.session_state["lista_materias"]:
+        for i, materia in enumerate(st.session_state["lista_materias"]):
+            st.write(f"**Casilla {i+1}:** {materia}")
+            
+        # Botón opcional para limpiar la lista y empezar de cero
+        if st.button("🗑️ Limpiar todas las materias"):
+            st.session_state["lista_materias"] = []
+            st.rerun()
+    else:
+        st.info("No has agregado materias aún. Usa el cuadro de arriba.")
 
 # --- Flujo de Autenticación Google ---
 def get_oauth_flow():
