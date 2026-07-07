@@ -142,15 +142,17 @@ def extraer_titulo_ocr(image_bytes):
         
     return texto_final
 
-# --- FUNCIÓN NUEVA EN DESARROLLO: Detectar Casilla Marcada (OMR) ---
+# --- Función de Detección Adaptada a la Lista Dinámica ---
 def detectar_materia_marcada(image_bytes):
-    # Por ahora, como tu hoja actual tiene nombres impresos y aún no hacemos el filtro de OpenCV
-    # simularemos que el algoritmo leyó que marcaste la "Casilla 1"
-    # En el siguiente paso meteremos aquí la lectura de la región inferior de la hoja
-    casilla_detectada = "Casilla 1" 
+    # Simulamos que OpenCV detectó que tachaste la primera casilla (Índice 0)
+    casilla_detectada_idx = 0 
     
-    # Buscamos qué materia tiene asignada esa casilla en la configuración del usuario
-    materia_final = st.session_state["mis_materias"][casilla_detectada]
+    # Validamos que la lista tenga elementos para evitar errores
+    if st.session_state["lista_materias"] and casilla_detectada_idx < len(st.session_state["lista_materias"]):
+        materia_final = st.session_state["lista_materias"][casilla_detectada_idx]
+    else:
+        materia_final = "General"
+        
     return materia_final
 
 # --- Función del Filtro de Escaneo Universal ---
