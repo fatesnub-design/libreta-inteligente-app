@@ -252,8 +252,9 @@ else:
         if archivo_subido:
             imagen_para_procesar = archivo_subido.getvalue()
 
-# --- FUNCIÓN NUEVA: Buscar o crear carpeta en Google Drive ---
-# Esta función es CRÍTICA y debe estar definida antes de que st.button intente usarla.
+# =========================================================================
+# 1. FUNCIÓN DE DRIVE (Debe estar alineada totalmente a la izquierda)
+# =========================================================================
 def obtener_o_crear_carpeta_drive(service, nombre_carpeta):
     # 1. Buscar si la carpeta ya existe
     query = f"name = '{nombre_carpeta}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
@@ -272,83 +273,87 @@ def obtener_o_crear_carpeta_drive(service, nombre_carpeta):
         carpeta = service.files().create(body=metadata_carpeta, fields='id').execute()
         return carpeta.get('id')
 
-# --- CONTROL DE FLUJO E INTERFAZ DE CONFIRMACIÓN (Opción 2) ---
-    if imagen_para_procesar is not None:
-        st.write("---")
-        st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
-        
-        # Botón inicial para activar el análisis por IA
-        if st.button("🔍 Analizar Escaneo", type="secondary"):
-            with st.spinner("Leyendo hoja con Inteligencia Artificial..."):
-                # Guardamos los resultados del análisis en el estado de la sesión
-                st.session_state["ocr_titulo_detectado"] = extraer_titulo_ocr(imagen_para_procesar)
-                st.session_state["omr_materia_detectada"] = detectar_materia_marcada(imagen_para_procesar)
-                st.session_state["analisis_listo"] = True
 
-        # Si la IA ya analizó la imagen, desplegamos el panel de control manual
-        if st.session_state.get("analisis_listo", False):
-            st.markdown("### 🛠️ Panel de Verificación Manual")
-            st.info("Revisa si la IA leyó todo correctamente. Puedes editar los campos si es necesario antes de subir.")
+# =========================================================================
+# 2. CONTROL DE FLUJO E INTERFAZ DE CONFIRMACIÓN 
+# (Alineado correctamente a la izquierda o dentro de tu condicional de imagen)
+# =========================================================================
+if imagen_para_procesar is not None:
+    st.write("---")
+    st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
+    
+    # Botón inicial para activar el análisis por IA
+    if st.button("🔍 Analizar Escaneo", type="secondary"):
+        with st.spinner("Leyendo hoja con Inteligencia Artificial..."):
+            # Guardamos los resultados del análisis en el estado de la sesión
+            st.session_state["ocr_titulo_detectado"] = extraer_titulo_ocr(imagen_para_procesar)
+            st.session_state["omr_materia_detectada"] = detectar_materia_marcada(imagen_para_procesar)
+            st.session_state["analisis_listo"] = True
+
+    # Si la IA ya analizó la imagen, desplegamos el panel de control manual
+    if st.session_state.get("analisis_listo", False):
+        st.markdown("### 🛠️ Panel de Verificación Manual")
+        st.info("Revisa si la IA leyó todo correctamente. Puedes editar los campos si es necesario antes de subir.")
+        
+        # 1. Campo editable para el Título
+        titulo_verificado = st.text_input(
+            "📝 Título del documento:", 
+            value=st.session_state.get("ocr_titulo_detectado", "Escaneo_Sin_Nombre")
+        )
+        
+        # 2. Menú desplegable para la Materia/Carpeta Destino
+        opciones_carpetas = st.session_state["lista_materias"] if st.session_state["lista_materias"] else ["General"]
+        
+        # Intentamos preseleccionar la que detectó el OMR, si no, la primera de la lista
+        materia_detectada = st.session_state.get("omr_materia_detectada", "General")
+        idx_preseleccionado = 0
+        if materia_detectada in opciones_carpetas:
+            idx_preseleccionado = opciones_carpetas.index(materia_detectada)
             
-            # 1. Campo editable para el Título
-            titulo_verificado = st.text_input(
-                "📝 Título del documento:", 
-                value=st.session_state.get("ocr_titulo_detectado", "Escaneo_Sin_Nombre")
-            )
-            
-            # 2. Menú desplegable para la Materia/Carpeta Destino
-            # Si la lista de materias está vacía, usamos una por defecto
-            opciones_carpetas = st.session_state["lista_materias"] if st.session_state["lista_materias"] else ["General"]
-            
-            # Intentamos preseleccionar la que detectó el OMR, si no, la primera de la lista
-            materia_detectada = st.session_state.get("omr_materia_detectada", "General")
-            idx_preseleccionado = 0
-            if materia_detectada in opciones_carpetas:
-                idx_preseleccionado = opciones_carpetas.index(materia_detectada)
-                
-            materia_verificada = st.selectbox(
-                "📁 Carpeta de destino en Drive:",
-                options=opciones_carpetas,
-                index=idx_preseleccionado
-            )
-            
-            st.write("")
-            # 3. BOTÓN CRÍTICO DEFINITIVO
-            if st.button("🚀 Confirmar y Guardar en Google Drive", type="primary"):
-                with st.spinner("Subiendo archivo limpio a tu nube..."):
-                    try:
-                        # Aplicar Filtro de limpieza
-                        imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
-                        
-                        # Conectar a la API de Drive
-                        creds = st.session_state["credentials"]
-                        service = build('drive', 'v3', credentials=creds)
-                        
-                        # Obtener o crear la carpeta usando el valor VERIFICADO por el usuario
-                        id_carpeta_destino = obtener_o_crear_carpeta_drive(service, materia_verificada)
-                        
-                        # Metadatos con el título VERIFICADO por el usuario
-                        file_metadata = {
-                            'name': f"{titulo_verificado}.jpg",
-                            'parents': [id_carpeta_destino]
-                        }
-                        
-                        media = MediaIoBaseUpload(
-                            io.BytesIO(imagen_limpia_bytes), 
-                            mimetype='image/jpeg', 
-                            resumable=True
-                        )
-                        
-                        file = service.files().create(
-                            body=file_metadata,
-                            media_body=media,
-                            fields='id'
-                        ).execute()
-                        
-                        st.success(f"¡Excelente! Guardado con éxito en **{materia_verificada}** como '{titulo_verificado}.jpg'")
-                        
-                        # Limpiamos el estado para el siguiente escaneo
-                        st.session_state["analisis_listo"] = False
-                        
-                    except Exception as e:
-                        st.error(f"Hubo un error crítico al subir: {e}")
+        materia_verificada = st.selectbox(
+            "📁 Carpeta de destino en Drive:",
+            options=opciones_carpetas,
+            index=idx_preseleccionado
+        )
+        
+        st.write("")
+        # 3. BOTÓN CRÍTICO DEFINITIVO
+        if st.button("🚀 Confirmar y Guardar en Google Drive", type="primary"):
+            with st.spinner("Subiendo archivo limpio a tu nube..."):
+                try:
+                    # Aplicar Filtro de limpieza
+                    imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
+                    
+                    # Conectar a la API de Drive
+                    creds = st.session_state["credentials"]
+                    service = build('drive', 'v3', credentials=creds)
+                    
+                    # Obtener o crear la carpeta usando el valor VERIFICADO por el usuario
+                    id_carpeta_destino = obtener_o_crear_carpeta_drive(service, materia_verificada)
+                    
+                    # Metadatos con el título VERIFICADO por el usuario
+                    file_metadata = {
+                        'name': f"{titulo_verificado}.jpg",
+                        'parents': [id_carpeta_destino]
+                    }
+                    
+                    media = MediaIoBaseUpload(
+                        io.BytesIO(imagen_limpia_bytes), 
+                        mimetype='image/jpeg', 
+                        resumable=True
+                    )
+                    
+                    file = service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id'
+                    ).execute()
+                    
+                    st.success(f"¡Excelente! Guardado con éxito en **{materia_verificada}** como '{titulo_verificado}.jpg'")
+                    
+                    # Limpiamos el estado para el siguiente escaneo
+                    st.session_state["analisis_listo"] = False
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Hubo un error crítico al subir: {e}")
