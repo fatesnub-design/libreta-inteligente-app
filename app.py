@@ -44,13 +44,46 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Inicializar el Lector de OCR en Caché (Para que no recargue en cada clic) ---
+# --- Inicializar el Lector de OCR en Caché ---
 @st.cache_resource
 def cargar_lector_ocr():
-    # Inicializa el lector para idioma español ('es') e inglés ('en')
     return easyocr.Reader(['es', 'en'], gpu=False)
 
 reader = cargar_lector_ocr()
+
+# --- Inicializar Variables de Sesión para las Materias ---
+# Creamos 6 espacios fijos que corresponden a las 6 filas/columnas de tu tabla de abajo
+if "mis_materias" not in st.session_state:
+    st.session_state["mis_materias"] = {
+        "Casilla 1": "Matemáticas",
+        "Casilla 2": "Física",
+        "Casilla 3": "Química",
+        "Casilla 4": "Historia",
+        "Casilla 5": "Programación",
+        "Casilla 6": "Inglés"
+    }
+
+# --- CONFIGURACIÓN DE MATERIAS EN LA BARRA LATERAL (SIDEBAR) ---
+with st.sidebar:
+    st.header("⚙️ Configuración de Libreta")
+    st.write("Asigna qué materia corresponde a cada casilla de tu hoja impresa:")
+    
+    # El usuario puede renombrar las materias previamente desde aquí
+    m1 = st.text_input("Casilla 1:", st.session_state["mis_materias"]["Casilla 1"])
+    m2 = st.text_input("Casilla 2:", st.session_state["mis_materias"]["Casilla 2"])
+    m3 = st.text_input("Casilla 3:", st.session_state["mis_materias"]["Casilla 3"])
+    m4 = st.text_input("Casilla 4:", st.session_state["mis_materias"]["Casilla 4"])
+    m5 = st.text_input("Casilla 5:", st.session_state["mis_materias"]["Casilla 5"])
+    m6 = st.text_input("Casilla 6:", st.session_state["mis_materias"]["Casilla 6"])
+    
+    if st.button("Guardar Materias"):
+        st.session_state["mis_materias"]["Casilla 1"] = m1
+        st.session_state["mis_materias"]["Casilla 2"] = m2
+        st.session_state["mis_materias"]["Casilla 3"] = m3
+        st.session_state["mis_materias"]["Casilla 4"] = m4
+        st.session_state["mis_materias"]["Casilla 5"] = m5
+        st.session_state["mis_materias"]["Casilla 6"] = m6
+        st.success("¡Materias sincronizadas!")
 
 # --- Flujo de Autenticación Google ---
 def get_oauth_flow():
@@ -70,46 +103,34 @@ def get_oauth_flow():
     flow.code_verifier = None
     return flow
 
-# --- FUNCIÓN NUEVA: Extraer Título por OCR ---
+# --- Extraer Título por OCR ---
 def extraer_titulo_ocr(image_bytes):
-    # 1. Convertir bytes a OpenCV
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     h, w = img.shape[:2]
     
-    # Mantenemos el 22% para asegurar el renglón
     recorte_superior = img[0:int(h * 0.22), 0:w]
-    
-    # 2. Pasar el recorte al lector OCR
     resultados = reader.readtext(recorte_superior)
     
     texto_acumulado = ""
     for (bbox, texto, probabilidad) in resultados:
-        # Remover la palabra "Nombre" o "Nombre:"
         texto_limpio_bloque = re.sub(r'(?i)nombre\s*:?', '', texto).strip()
         if probabilidad > 0.30 and len(texto_limpio_bloque) > 2:
             texto_acumulado += " " + texto_limpio_bloque
             
-    # Limpieza inicial de espacios
     texto_final = " ".join(texto_acumulado.split()).strip()
     
-    # 3. CORTE INTELIGENTE POR CARACTERES (Máximo 35 letras)
     if len(texto_final) > 35:
-        # Cortamos a los 35 caracteres
         texto_final = texto_final[:35]
-        # Buscamos el último espacio para no mochar una palabra a la mitad
         if " " in texto_final:
             texto_final = texto_final.rsplit(" ", 1)[0]
             
-    # Limpieza de conectores huérfanos comunes al final del título
     palabras = texto_final.split()
     conectores_prohibidos = ["si", "la", "el", "con", "de", "un", "y", "a", "q"]
     if palabras and palabras[-1].lower() in conectores_prohibidos:
-        palabras.pop() # Eliminamos el conector sobrante de la orilla
+        palabras.pop()
     
     texto_final = " ".join(palabras)
-    
-    # Quitar caracteres inválidos para archivos
     texto_final = re.sub(r'[\\/*?:"<>|.]', "", texto_final).strip()
     
     if not texto_final:
@@ -118,6 +139,17 @@ def extraer_titulo_ocr(image_bytes):
         texto_final = texto_final.title()
         
     return texto_final
+
+# --- FUNCIÓN NUEVA EN DESARROLLO: Detectar Casilla Marcada (OMR) ---
+def detectar_materia_marcada(image_bytes):
+    # Por ahora, como tu hoja actual tiene nombres impresos y aún no hacemos el filtro de OpenCV
+    # simularemos que el algoritmo leyó que marcaste la "Casilla 1"
+    # En el siguiente paso meteremos aquí la lectura de la región inferior de la hoja
+    casilla_detectada = "Casilla 1" 
+    
+    # Buscamos qué materia tiene asignada esa casilla en la configuración del usuario
+    materia_final = st.session_state["mis_materias"][casilla_detectada]
+    return materia_final
 
 # --- Función del Filtro de Escaneo Universal ---
 def aplicar_filtro_escaneo(image_bytes):
@@ -148,7 +180,6 @@ if "credentials" not in st.session_state:
         
     flow = st.session_state["oauth_flow"]
     auth_url, _ = flow.authorization_url(prompt='select_account')
-    
     st.markdown(f"[Haz clic aquí para obtener tu código de verificación de Google]({auth_url})")
     codigo = st.text_input("Pega aquí el código que te dio Google:")
     
@@ -169,11 +200,10 @@ else:
     st.write("---")
     
     tab1, tab2 = st.tabs(["📸 Cámara en Vivo", "📁 Subir Archivo (Pruebas)"])
-    
     imagen_para_procesar = None
     
     with tab1:
-        st.write("Apunta con la cámara de tu dispositivo usando la guía verde:")
+        st.write("Apunta con la cámara de tu dispositivo:")
         foto_camara = st.camera_input("Tomar foto de la libreta")
         if foto_camara:
             imagen_para_procesar = foto_camara.getvalue()
@@ -190,22 +220,25 @@ else:
         st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
         
         if st.button("Procesar y Guardar en Google Drive", type="primary"):
-            with st.spinner("Leyendo título a mano y aplicando filtros avanzados..."):
+            with st.spinner("Procesando título y destino..."):
                 try:
-                    # 1. PASO NUEVO: Extraemos el título del papel usando OCR antes de aplicar filtros destructivos
+                    # 1. Extraer Título (OCR)
                     titulo_detectado = extraer_titulo_ocr(imagen_para_procesar)
-                    st.info(f"🔎 Título detectado por OCR: **{titulo_detectado}**")
                     
-                    # 2. Aplicamos el filtro de limpieza
+                    # 2. NUEVO: Detectar Materia Destino basada en la tabla configurada
+                    materia_destino = detectar_materia_marcada(imagen_para_procesar)
+                    
+                    st.info(f"🔎 Título: **{titulo_detectado}** | 📁 Carpeta Destino: **{materia_destino}**")
+                    
+                    # 3. Aplicar Filtro de limpieza
                     imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
-                    st.image(imagen_limpia_bytes, caption="Resultado Final Enviado a Drive", use_container_width=True)
                     
-                    # 3. Proceso de subida a la API de Drive usando el título dinámico
+                    # 4. Subida a Drive usando metadatos dinámicos
                     creds = st.session_state["credentials"]
                     service = build('drive', 'v3', credentials=creds)
                     
-                    # El nombre del archivo ahora es el título detectado por la IA
-                    file_metadata = {'name': f"{titulo_detectado}.jpg"}
+                    # El archivo se guardará con el nombre de la materia prefijado para organización
+                    file_metadata = {'name': f"[{materia_destino}] {titulo_detectado}.jpg"}
                     media = MediaIoBaseUpload(
                         io.BytesIO(imagen_limpia_bytes), 
                         mimetype='image/jpeg', 
@@ -218,7 +251,7 @@ else:
                         fields='id'
                     ).execute()
                     
-                    st.success(f"¡Escaneo guardado con éxito como '{titulo_detectado}.jpg'! ID: {file.get('id')}")
+                    st.success(f"¡Guardado en Drive como '[{materia_destino}] {titulo_detectado}.jpg'!")
                     
                 except Exception as e:
-                    st.error(f"Hubo un error crítico al procesar o subir el archivo: {e}")
+                    st.error(f"Hubo un error crítico: {e}")
