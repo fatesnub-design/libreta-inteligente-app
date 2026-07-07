@@ -252,6 +252,26 @@ else:
         if archivo_subido:
             imagen_para_procesar = archivo_subido.getvalue()
 
+# --- FUNCIÓN NUEVA: Buscar o crear carpeta en Google Drive ---
+# Esta función es CRÍTICA y debe estar definida antes de que st.button intente usarla.
+def obtener_o_crear_carpeta_drive(service, nombre_carpeta):
+    # 1. Buscar si la carpeta ya existe
+    query = f"name = '{nombre_carpeta}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    resultados = service.files().list(q=query, fields="files(id)").execute()
+    files = resultados.get('files', [])
+    
+    if files:
+        # Si ya existe, devolvemos su ID
+        return files[0]['id']
+    else:
+        # Si no existe, la creamos desde cero
+        metadata_carpeta = {
+            'name': nombre_carpeta,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        carpeta = service.files().create(body=metadata_carpeta, fields='id').execute()
+        return carpeta.get('id')
+
 # --- CONTROL DE FLUJO E INTERFAZ DE CONFIRMACIÓN (Opción 2) ---
     if imagen_para_procesar is not None:
         st.write("---")
