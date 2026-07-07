@@ -8,6 +8,8 @@ import io
 import cv2
 import easyocr
 import re
+import datetime
+import time
 
 # --- Configuración de la Página e Inyección de CSS (Guía Rocketbook) ---
 st.set_page_config(page_title="Mi Libreta Inteligente", layout="centered")
@@ -55,6 +57,10 @@ reader = cargar_lector_ocr()
 if "lista_materias" not in st.session_state:
     # Empezamos con unas por defecto, pero ahora es una lista indexada
     st.session_state["lista_materias"] = ["Matemáticas", "Física", "Química", "Personal / Notas"]
+
+# --- 1. Inicializar el Historial en la Sesión (Pon esto arriba con tus otras variables de sesión) ---
+if "historial_escaneos" not in st.session_state:
+    st.session_state["historial_escaneos"] = []
 
 # --- CONFIGURACIÓN DINÁMICA EN LA BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
@@ -278,6 +284,7 @@ def obtener_o_crear_carpeta_drive(service, nombre_carpeta):
 # 2. CONTROL DE FLUJO E INTERFAZ DE CONFIRMACIÓN 
 # (Alineado correctamente a la izquierda o dentro de tu condicional de imagen)
 # =========================================================================
+# --- 2. Bloque de Procesamiento e Interfaz de Confirmación (Reemplazo Completo) ---
 if imagen_para_procesar is not None:
     st.write("---")
     st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
@@ -285,30 +292,31 @@ if imagen_para_procesar is not None:
     # Botón inicial para activar el análisis por IA
     if st.button("🔍 Analizar Escaneo", type="secondary"):
         with st.spinner("Leyendo hoja con Inteligencia Artificial..."):
-            # Guardamos los resultados del análisis en el estado de la sesión
-            st.session_state["ocr_titulo_detectado"] = extraer_titulo_ocr(imagen_para_procesar)
+            # Extraer y limpiar el título inicial del OCR
+            ocr_inicial = extraer_titulo_ocr(imagen_para_procesar).strip()
+            
+            # MEJORA 3: Autocompletado inteligente si viene vacío o indescifrable
+            if not ocr_inicial or ocr_inicial == "Escaneo_Sin_Nombre":
+                fecha_hoy = datetime.datetime.now().strftime("%Y_%m_%d_%H%M")
+                ocr_inicial = f"Nota_{fecha_hoy}"
+                
+            st.session_state["ocr_titulo_detectado"] = ocr_inicial
             st.session_state["omr_materia_detectada"] = detectar_materia_marcada(imagen_para_procesar)
             st.session_state["analisis_listo"] = True
 
-    # Si la IA ya analizó la imagen, desplegamos el panel de control manual
+    # Panel de Verificación Manual
     if st.session_state.get("analisis_listo", False):
         st.markdown("### 🛠️ Panel de Verificación Manual")
         st.info("Revisa si la IA leyó todo correctamente. Puedes editar los campos si es necesario antes de subir.")
         
-        # 1. Campo editable para el Título
         titulo_verificado = st.text_input(
             "📝 Título del documento:", 
-            value=st.session_state.get("ocr_titulo_detectado", "Escaneo_Sin_Nombre")
+            value=st.session_state.get("ocr_titulo_detectado", "Nota_Sin_Nombre")
         )
         
-        # 2. Menú desplegable para la Materia/Carpeta Destino
         opciones_carpetas = st.session_state["lista_materias"] if st.session_state["lista_materias"] else ["General"]
-        
-        # Intentamos preseleccionar la que detectó el OMR, si no, la primera de la lista
         materia_detectada = st.session_state.get("omr_materia_detectada", "General")
-        idx_preseleccionado = 0
-        if materia_detectada in opciones_carpetas:
-            idx_preseleccionado = opciones_carpetas.index(materia_detectada)
+        idx_preseleccionado = opciones_carpetas.index(materia_detectada) if materia_detectada in opciones_carpetas else 0
             
         materia_verificada = st.selectbox(
             "📁 Carpeta de destino en Drive:",
@@ -317,43 +325,85 @@ if imagen_para_procesar is not None:
         )
         
         st.write("")
-        # 3. BOTÓN CRÍTICO DEFINITIVO
+        
+        # BOTÓN CRÍTICO DEFINITIVO
         if st.button("🚀 Confirmar y Guardar en Google Drive", type="primary"):
-            with st.spinner("Subiendo archivo limpio a tu nube..."):
-                try:
-                    # Aplicar Filtro de limpieza
-                    imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
-                    
-                    # Conectar a la API de Drive
-                    creds = st.session_state["credentials"]
-                    service = build('drive', 'v3', credentials=creds)
-                    
-                    # Obtener o crear la carpeta usando el valor VERIFICADO por el usuario
-                    id_carpeta_destino = obtener_o_crear_carpeta_drive(service, materia_verificada)
-                    
-                    # Metadatos con el título VERIFICADO por el usuario
-                    file_metadata = {
-                        'name': f"{titulo_verificado}.jpg",
-                        'parents': [id_carpeta_destino]
-                    }
-                    
-                    media = MediaIoBaseUpload(
-                        io.BytesIO(imagen_limpia_bytes), 
-                        mimetype='image/jpeg', 
-                        resumable=True
-                    )
-                    
-                    file = service.files().create(
-                        body=file_metadata,
-                        media_body=media,
-                        fields='id'
-                    ).execute()
-                    
-                    # 1. Mostramos el mensaje de éxito estático
-                    st.success(f"¡Excelente! Guardado con éxito en **{materia_verificada}** como '{titulo_verificado}.jpg'")
-                    
-                    # 2. Desactivamos el panel de edición para el siguiente escaneo
-                    st.session_state["analisis_listo"] = False
-                    
-                except Exception as e:
-                    st.error(f"Hubo un error crítico al subir: {e}")
+            # MEJORA 2: Barra de Progreso Dinámica Animada
+            barra_progreso = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                status_text.text("🎨 Aplicando filtros de limpieza y contraste...")
+                barra_progreso.progress(25)
+                imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
+                time.sleep(0.4)
+                
+                status_text.text("📡 Estableciendo conexión segura con Google Drive...")
+                barra_progreso.progress(50)
+                creds = st.session_state["credentials"]
+                service = build('drive', 'v3', credentials=creds)
+                time.sleep(0.4)
+                
+                status_text.text(f"📁 Verificando existencia de la carpeta '{materia_verificada}'...")
+                barra_progreso.progress(75)
+                id_carpeta_destino = obtener_o_crear_carpeta_drive(service, materia_verificada)
+                
+                status_text.text("⬆️ Subiendo archivo final a la nube...")
+                barra_progreso.progress(90)
+                
+                # Si el usuario borró todo el título manualmente en la caja de texto
+                if not titulo_verificado.strip():
+                    fecha_hoy = datetime.datetime.now().strftime("%Y_%m_%d_%H%M")
+                    titulo_verificado = f"Nota_{materia_verificada}_{fecha_hoy}"
+
+                file_metadata = {
+                    'name': f"{titulo_verificado.strip()}.jpg",
+                    'parents': [id_carpeta_destino]
+                }
+                
+                media = MediaIoBaseUpload(
+                    io.BytesIO(imagen_limpia_bytes), 
+                    mimetype='image/jpeg', 
+                    resumable=True
+                )
+                
+                file = service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                ).execute()
+                
+                # Completar barra
+                barra_progreso.progress(100)
+                status_text.empty()
+                
+                # Mensaje de éxito fijo
+                st.success(f"¡Excelente! Guardado con éxito en **{materia_verificada}** como '{titulo_verificado}.jpg'")
+                
+                # MEJORA 1: Registrar en el historial de la sesión
+                hora_actual = datetime.datetime.now().strftime("%I:%M %p")
+                st.session_state["historial_escaneos"].insert(0, {
+                    "hora": hora_actual,
+                    "archivo": f"{titulo_verificado}.jpg",
+                    "carpeta": materia_verificada
+                })
+                
+                # Ocultar el panel de edición hasta el próximo escaneo
+                st.session_state["analisis_listo"] = False
+                
+            except Exception as e:
+                barra_progreso.empty()
+                status_text.empty()
+                st.error(f"Hubo un error crítico al subir: {e}")
+
+# --- MEJORA 1 CONTINUACIÓN: Mostrar el historial en la Barra Lateral (Sidebar) ---
+with st.sidebar:
+    st.write("---")
+    st.subheader("⏱️ Escaneos Recientes")
+    if st.session_state["historial_escaneos"]:
+        # Mostramos solo los últimos 5 para mantener la barra limpia
+        for item in st.session_state["historial_escaneos"][:5]:
+            st.markdown(f"**{item['hora']}** - *{item['carpeta']}* \n `{item['archivo']}`")
+            st.write("---")
+    else:
+        st.caption("Aún no has subido documentos en esta sesión.")
