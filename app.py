@@ -349,9 +349,11 @@ if imagen_para_procesar is not None:
                         fields='id'
                     ).execute()
                     
-                    # 1. Mostramos el mensaje de éxito (¡Ahora sí se quedará estático!)
+                    # 1. Mostramos el mensaje de éxito estático
                     st.success(f"¡Excelente! Guardado con éxito en **{materia_verificada}** como '{titulo_verificado}.jpg'")
                     
-                    # 2. Desactivamos el análisis para que el panel de edición se oculte 
-                    # pero NO reiniciamos la app a la fuerza con st.rerun()
+                    # 2. Desactivamos el panel de edición para el siguiente escaneo
                     st.session_state["analisis_listo"] = False
+                    
+                except Exception as e:
+                    st.error(f"Hubo un error crítico al subir: {e}")
