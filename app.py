@@ -77,31 +77,38 @@ def extraer_titulo_ocr(image_bytes):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     h, w = img.shape[:2]
     
-    # MODIFICACIÓN: Ampliamos el rango al 22% para asegurar que entre todo el renglón
+    # Mantenemos el 22% para asegurar que no se pierda el renglón
     recorte_superior = img[0:int(h * 0.22), 0:w]
     
     # 2. Pasar el recorte al lector OCR
     resultados = reader.readtext(recorte_superior)
     
-    texto_detectado = ""
+    palabras_titulo = []
+    
     for (bbox, texto, probabilidad) in resultados:
-        # Hacemos la limpieza más inteligente para remover "Nombre" o "Nombre:" si aparecen
-        texto_limpio_bloque = re.sub(r'(?i)nombre\s*:?', '', texto)
+        # Limpieza para remover la palabra fija "Nombre" o "Nombre:"
+        texto_limpio_bloque = re.sub(r'(?i)nombre\s*:?', '', texto).strip()
         
-        # Bajamos ligeramente la probabilidad a 0.30 para que acepte trazos de lápiz más tenues
-        if probabilidad > 0.30 and len(texto_limpio_bloque.strip()) > 2:
-            texto_detectado += " " + texto_limpio_bloque
+        if probabilidad > 0.30 and len(texto_limpio_bloque) > 2:
+            # Dividimos el bloque en palabras individuales
+            palabras_titulo.extend(texto_limpio_bloque.split())
             
-    # 3. Limpieza final de espacios y caracteres prohibidos
-    texto_final = texto_detectado.strip()
-    texto_final = re.sub(r'[\\/*?:"<>|]', "", texto_final)
+    # 3. RECORTE INTELIGENTE DE LONGITUD (Estilo Rocketbook)
+    # Si detectó muchas palabras (un párrafo), nos quedamos solo con las primeras 5 para el título
+    if len(palabras_titulo) > 5:
+        palabras_titulo = palabras_titulo[:5]
+        
+    texto_final = " ".join(palabras_titulo)
     
-    # Reemplazar múltiples espacios por uno solo
-    texto_final = " ".join(texto_final.split())
+    # Limpieza final de caracteres prohibidos por los sistemas operativos
+    texto_final = re.sub(r'[\\/*?:"<>|.]', "", texto_final).strip()
     
-    # Si de verdad no leyó nada, dejamos el respaldo seguro
+    # Si quedó vacío, asignamos el genérico seguro
     if not texto_final:
         texto_final = "Escaneo_Sin_Nombre"
+    else:
+        # Formatear como título (Mayúscula la primera letra de cada palabra) para que se vea limpio
+        texto_final = texto_final.title()
         
     return texto_final
 
