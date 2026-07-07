@@ -77,37 +77,44 @@ def extraer_titulo_ocr(image_bytes):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     h, w = img.shape[:2]
     
-    # Mantenemos el 22% para asegurar que no se pierda el renglón
+    # Mantenemos el 22% para asegurar el renglón
     recorte_superior = img[0:int(h * 0.22), 0:w]
     
     # 2. Pasar el recorte al lector OCR
     resultados = reader.readtext(recorte_superior)
     
-    palabras_titulo = []
-    
+    texto_acumulado = ""
     for (bbox, texto, probabilidad) in resultados:
-        # Limpieza para remover la palabra fija "Nombre" o "Nombre:"
+        # Remover la palabra "Nombre" o "Nombre:"
         texto_limpio_bloque = re.sub(r'(?i)nombre\s*:?', '', texto).strip()
-        
         if probabilidad > 0.30 and len(texto_limpio_bloque) > 2:
-            # Dividimos el bloque en palabras individuales
-            palabras_titulo.extend(texto_limpio_bloque.split())
+            texto_acumulado += " " + texto_limpio_bloque
             
-    # 3. RECORTE INTELIGENTE DE LONGITUD (Estilo Rocketbook)
-    # Si detectó muchas palabras (un párrafo), nos quedamos solo con las primeras 5 para el título
-    if len(palabras_titulo) > 5:
-        palabras_titulo = palabras_titulo[:5]
-        
-    texto_final = " ".join(palabras_titulo)
+    # Limpieza inicial de espacios
+    texto_final = " ".join(texto_acumulado.split()).strip()
     
-    # Limpieza final de caracteres prohibidos por los sistemas operativos
+    # 3. CORTE INTELIGENTE POR CARACTERES (Máximo 35 letras)
+    if len(texto_final) > 35:
+        # Cortamos a los 35 caracteres
+        texto_final = texto_final[:35]
+        # Buscamos el último espacio para no mochar una palabra a la mitad
+        if " " in texto_final:
+            texto_final = texto_final.rsplit(" ", 1)[0]
+            
+    # Limpieza de conectores huérfanos comunes al final del título
+    palabras = texto_final.split()
+    conectores_prohibidos = ["si", "la", "el", "con", "de", "un", "y", "a", "q"]
+    if palabras and palabras[-1].lower() in conectores_prohibidos:
+        palabras.pop() # Eliminamos el conector sobrante de la orilla
+    
+    texto_final = " ".join(palabras)
+    
+    # Quitar caracteres inválidos para archivos
     texto_final = re.sub(r'[\\/*?:"<>|.]', "", texto_final).strip()
     
-    # Si quedó vacío, asignamos el genérico seguro
     if not texto_final:
         texto_final = "Escaneo_Sin_Nombre"
     else:
-        # Formatear como título (Mayúscula la primera letra de cada palabra) para que se vea limpio
         texto_final = texto_final.title()
         
     return texto_final
