@@ -142,16 +142,50 @@ def extraer_titulo_ocr(image_bytes):
         
     return texto_final
 
-# --- Función de Detección Adaptada a la Lista Dinámica ---
+# --- Función de Detección Real OMR con OpenCV ---
 def detectar_materia_marcada(image_bytes):
-    # Simulamos que OpenCV detectó que tachaste la primera casilla (Índice 0)
-    casilla_detectada_idx = 0 
+    # 1. Convertir la imagen a escala de grises
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    h, w = img.shape[:2]
     
-    # Validamos que la lista tenga elementos para evitar errores
-    if st.session_state["lista_materias"] and casilla_detectada_idx < len(st.session_state["lista_materias"]):
-        materia_final = st.session_state["lista_materias"][casilla_detectada_idx]
+    # 2. Recortar la franja inferior (donde están los números y círculos)
+    # Tomamos del 90% al 98% de la altura total de la hoja corregida
+    recorte_inferior = img[int(h * 0.90):int(h * 0.98), 0:w]
+    
+    # 3. Preprocesar para binarizar (Blanco y Negro puro)
+    gray = cv2.cvtColor(recorte_inferior, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    
+    # 4. Dividir el ancho en 8 columnas iguales
+    ancho_columna = w // 8
+    pixeles_por_casilla = []
+    
+    for i in range(8):
+        # Aislar la columna actual
+        x_inicio = i * ancho_columna
+        x_fin = (i + 1) * ancho_columna
+        casilla = thresh[0:recorte_inferior.shape[0], x_inicio:x_fin]
+        
+        # Contar cuántos píxeles están marcados (blancos en la imagen invertida)
+        total_pixeles = cv2.countNonZero(casilla)
+        pixeles_por_casilla.append(total_pixeles)
+        
+    # 5. Encontrar cuál casilla tiene la mayor cantidad de trazo
+    casilla_marcada_idx = np.argmax(pixeles_por_casilla)
+    max_pixeles = pixeles_por_casilla[casilla_marcada_idx]
+    
+    # Umbral de seguridad: Si la casilla más marcada no tiene suficientes píxeles, 
+    # asumimos que la hoja se dejó vacía por error.
+    if max_pixeles < 50: 
+        return "General"
+        
+    # 6. Mapear el índice (0 a 7) con tu lista dinámica de Streamlit
+    if st.session_state["lista_materias"] and casilla_marcada_idx < len(st.session_state["lista_materias"]):
+        materia_final = st.session_state["lista_materias"][casilla_marcada_idx]
     else:
-        materia_final = "General"
+        # Si la casilla marcada no tiene materia asignada aún en la app
+        materia_final = f"Casilla_{casilla_marcada_idx + 1}"
         
     return materia_final
 
