@@ -138,7 +138,7 @@ else:
             nombre_archivo = archivo_subido.name
 
     # --- 6. Botón de Ejecución Único ---
-    if imagen_para_processar is not None:
+    if imagen_para_procesar is not None:
         st.write("---")
         st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
         
