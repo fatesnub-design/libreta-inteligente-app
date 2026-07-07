@@ -218,44 +218,71 @@ else:
         if archivo_subido:
             imagen_para_procesar = archivo_subido.getvalue()
 
-    # --- Botón de Ejecución Único ---
-    if imagen_para_procesar is not None:
-        st.write("---")
-        st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
-        
-        if st.button("Procesar y Guardar en Google Drive", type="primary"):
-            with st.spinner("Procesando título y destino..."):
-                try:
-                    # 1. Extraer Título (OCR)
-                    titulo_detectado = extraer_titulo_ocr(imagen_para_procesar)
-                    
-                    # 2. NUEVO: Detectar Materia Destino basada en la tabla configurada
-                    materia_destino = detectar_materia_marcada(imagen_para_procesar)
-                    
-                    st.info(f"🔎 Título: **{titulo_detectado}** | 📁 Carpeta Destino: **{materia_destino}**")
-                    
-                    # 3. Aplicar Filtro de limpieza
-                    imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
-                    
-                    # 4. Subida a Drive usando metadatos dinámicos
-                    creds = st.session_state["credentials"]
-                    service = build('drive', 'v3', credentials=creds)
-                    
-                    # El archivo se guardará con el nombre de la materia prefijado para organización
-                    file_metadata = {'name': f"[{materia_destino}] {titulo_detectado}.jpg"}
-                    media = MediaIoBaseUpload(
-                        io.BytesIO(imagen_limpia_bytes), 
-                        mimetype='image/jpeg', 
-                        resumable=True
-                    )
-                    
-                    file = service.files().create(
-                        body=file_metadata,
-                        media_body=media,
-                        fields='id'
-                    ).execute()
-                    
-                    st.success(f"¡Guardado en Drive como '[{materia_destino}] {titulo_detectado}.jpg'!")
-                    
-                except Exception as e:
-                    st.error(f"Hubo un error crítico: {e}")
+# --- FUNCIÓN NUEVA: Buscar o crear carpeta en Google Drive ---
+def obtener_o_crear_carpeta_drive(service, nombre_carpeta):
+    # 1. Buscar si la carpeta ya existe
+    query = f"name = '{nombre_carpeta}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    resultados = service.files().list(q=query, fields="files(id)").execute()
+    files = resultados.get('files', [])
+    
+    if files:
+        # Si ya existe, devolvemos su ID
+        return files[0]['id']
+    else:
+        # Si no existe, la creamos desde cero
+        metadata_carpeta = {
+            'name': nombre_carpeta,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        carpeta = service.files().create(body=metadata_carpeta, fields='id').execute()
+        return carpeta.get('id')
+
+
+# --- 6. Botón de Ejecución Único (Actualizado) ---
+if imagen_para_procesar is not None:
+    st.write("---")
+    st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
+    
+    if st.button("Procesar y Guardar en Google Drive", type="primary"):
+        with st.spinner("Procesando título y ordenando en carpetas..."):
+            try:
+                # 1. Extraer Título (OCR)
+                titulo_detectado = extraer_titulo_ocr(imagen_para_procesar)
+                
+                # 2. Detectar Materia Destino basada en la tabla
+                materia_destino = detectar_materia_marcada(imagen_para_procesar)
+                
+                st.info(f"🔎 Título: **{titulo_detectado}** | 📁 Destino: Carpeta de **{materia_destino}**")
+                
+                # 3. Aplicar Filtro de limpieza
+                imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
+                
+                # 4. Conectar a la API de Drive
+                creds = st.session_state["credentials"]
+                service = build('drive', 'v3', credentials=creds)
+                
+                # --- PASO NUEVO: Obtener el ID de la carpeta real ---
+                id_carpeta_destino = obtener_o_crear_carpeta_drive(service, materia_destino)
+                
+                # Guardamos el archivo con su nombre limpio (ya no necesita los corchetes feos porque irá dentro de su carpeta)
+                file_metadata = {
+                    'name': f"{titulo_detectado}.jpg",
+                    'parents': [id_carpeta_destino]  # <--- Esto le dice a Google que lo meta DENTRO de la carpeta
+                }
+                
+                media = MediaIoBaseUpload(
+                    io.BytesIO(imagen_limpia_bytes), 
+                    mimetype='image/jpeg', 
+                    resumable=True
+                )
+                
+                file = service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                ).execute()
+                
+                st.success(f"¡Escaneo guardado con éxito dentro de la carpeta **{materia_destino}** como '{titulo_detectado}.jpg'!")
+                
+            except Exception as e:
+                st.error(f"Hubo un error crítico: {e}")
