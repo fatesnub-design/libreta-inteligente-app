@@ -6,22 +6,20 @@ from PIL import Image
 import numpy as np
 import io
 import cv2
+import easyocr
+import re
 
-# --- 1. Configuración de la Página e Inyección de CSS (Guía Rocketbook) ---
+# --- Configuración de la Página e Inyección de CSS (Guía Rocketbook) ---
 st.set_page_config(page_title="Mi Libreta Inteligente", layout="centered")
 
-# Este bloque inyecta la máscara verde fosforescente únicamente sobre la cámara en vivo
 st.markdown("""
     <style>
-    /* Ubica el contenedor de video nativo de Streamlit */
     div[data-testid="stCameraInput"] {
         position: relative;
         border: 2px solid #333;
         border-radius: 8px;
         overflow: hidden;
     }
-    
-    /* Dibuja la máscara verde translúcida de alineación */
     div[data-testid="stCameraInput"]::after {
         content: "Alinea el marco de la libreta aquí";
         position: absolute;
@@ -46,7 +44,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. Flujo de Autenticación Google ---
+# --- Inicializar el Lector de OCR en Caché (Para que no recargue en cada clic) ---
+@st.cache_resource
+def cargar_lector_ocr():
+    # Inicializa el lector para idioma español ('es') e inglés ('en')
+    return easyocr.Reader(['es', 'en'], gpu=False)
+
+reader = cargar_lector_ocr()
+
+# --- Flujo de Autenticación Google ---
 def get_oauth_flow():
     REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
     flow = Flow.from_client_config(
@@ -64,21 +70,47 @@ def get_oauth_flow():
     flow.code_verifier = None
     return flow
 
-# --- 3. Función del Filtro de Escaneo Universal ---
+# --- FUNCIÓN NUEVA: Extraer Título por OCR ---
+def extraer_titulo_ocr(image_bytes):
+    # 1. Convertir bytes a OpenCV
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    h, w = img.shape[:2]
+    
+    # 2. Recortar solo la sección superior (donde va el campo "Nombre:")
+    # Tomamos el primer 15% superior de la imagen para evitar procesar toda la hoja en vano
+    recorte_superior = img[0:int(h * 0.15), 0:w]
+    
+    # 3. Pasar el recorte al lector OCR
+    resultados = reader.readtext(recorte_superior)
+    
+    texto_detectado = ""
+    for (bbox, texto, probabilidad) in resultados:
+        # Ignoramos la palabra "Nombre" si el OCR la lee impresa de la plantilla
+        if "nombre" not in texto.lower() and probabilidad > 0.35:
+            texto_detectado += " " + texto
+            
+    # 4. Limpieza básica del string para evitar caracteres prohibidos en nombres de archivos
+    texto_limpio = texto_detectado.strip()
+    texto_limpio = re.sub(r'[\\/*?:"<>|]', "", texto_limpio)
+    
+    # Nombre por defecto si el OCR no logra leer nada
+    if not texto_limpio:
+        texto_limpio = "Escaneo_Sin_Nombre"
+        
+    return texto_limpio
+
+# --- Función del Filtro de Escaneo Universal ---
 def aplicar_filtro_escaneo(image_bytes):
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # Eliminación de iluminación compleja por división
     bg = cv2.GaussianBlur(gray, (51, 51), 0)
     normalized = cv2.divide(gray, bg, scale=255)
     
-    # Filtrado bilateral para eliminar ruido digital
     smoothed = cv2.bilateralFilter(normalized, 9, 50, 50)
     
-    # Binarización adaptativa de vecindario gigante (mantiene lápiz y quita sombras)
     final_scanned = cv2.adaptiveThreshold(
         smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
         cv2.THRESH_BINARY, 71, 12
@@ -89,7 +121,7 @@ def aplicar_filtro_escaneo(image_bytes):
     cleaned_img.save(buffered, format="JPEG", quality=95)
     return buffered.getvalue()
 
-# --- 4. Gestión de Estado de Credenciales ---
+# --- Gestión de Estado de Credenciales ---
 if "credentials" not in st.session_state:
     st.title("📝 Conectar Aplicación")
     if "oauth_flow" not in st.session_state:
@@ -112,50 +144,49 @@ if "credentials" not in st.session_state:
             if "oauth_flow" in st.session_state:
                 del st.session_state["oauth_flow"]
 else:
-    # --- 5. Interfaz Principal para Usuarios Autenticados ---
+    # --- Interfaz Principal ---
     st.title("📝 Mi Libreta Inteligente")
     st.success("🔒 Conectado a tu Google Drive")
     st.write("---")
     
-    # Implementación de pestañas para soportar ambos flujos (Producción vs Pruebas actuales)
     tab1, tab2 = st.tabs(["📸 Cámara en Vivo", "📁 Subir Archivo (Pruebas)"])
     
     imagen_para_procesar = None
-    nombre_archivo = "escaneo.jpg"
     
     with tab1:
         st.write("Apunta con la cámara de tu dispositivo usando la guía verde:")
         foto_camara = st.camera_input("Tomar foto de la libreta")
         if foto_camara:
             imagen_para_procesar = foto_camara.getvalue()
-            nombre_archivo = "Camara_Escaneo.jpg"
             
     with tab2:
-        st.write("Sube aquí las imágenes que te pase tu compañero para realizar simulaciones de filtro:")
+        st.write("Sube aquí las imágenes de simulación:")
         archivo_subido = st.file_uploader("Elige una foto desde tu equipo", type=["png", "jpg", "jpeg"])
         if archivo_subido:
             imagen_para_procesar = archivo_subido.getvalue()
-            nombre_archivo = archivo_subido.name
 
-    # --- 6. Botón de Ejecución Único ---
+    # --- Botón de Ejecución Único ---
     if imagen_para_procesar is not None:
         st.write("---")
         st.image(imagen_para_procesar, caption="Previsualización de la Captura", use_container_width=True)
         
         if st.button("Procesar y Guardar en Google Drive", type="primary"):
-            with st.spinner("Procesando filtros avanzados de escaneo y subiendo a la nube..."):
+            with st.spinner("Leyendo título a mano y aplicando filtros avanzados..."):
                 try:
-                    # Aplicamos el filtro de Sauvola/División
-                    imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
+                    # 1. PASO NUEVO: Extraemos el título del papel usando OCR antes de aplicar filtros destructivos
+                    titulo_detectado = extraer_titulo_ocr(imagen_para_procesar)
+                    st.info(f"🔎 Título detectado por OCR: **{titulo_detectado}**")
                     
-                    # Desplegamos el escaneo final corregido
+                    # 2. Aplicamos el filtro de limpieza
+                    imagen_limpia_bytes = aplicar_filtro_escaneo(imagen_para_procesar)
                     st.image(imagen_limpia_bytes, caption="Resultado Final Enviado a Drive", use_container_width=True)
                     
-                    # Proceso de subida a la API de Drive
+                    # 3. Proceso de subida a la API de Drive usando el título dinámico
                     creds = st.session_state["credentials"]
                     service = build('drive', 'v3', credentials=creds)
                     
-                    file_metadata = {'name': f"Limpio_{nombre_archivo}"}
+                    # El nombre del archivo ahora es el título detectado por la IA
+                    file_metadata = {'name': f"{titulo_detectado}.jpg"}
                     media = MediaIoBaseUpload(
                         io.BytesIO(imagen_limpia_bytes), 
                         mimetype='image/jpeg', 
@@ -168,7 +199,7 @@ else:
                         fields='id'
                     ).execute()
                     
-                    st.success(f"¡Escaneo procesado y guardado con éxito! ID de Drive: {file.get('id')}")
+                    st.success(f"¡Escaneo guardado con éxito como '{titulo_detectado}.jpg'! ID: {file.get('id')}")
                     
                 except Exception as e:
                     st.error(f"Hubo un error crítico al procesar o subir el archivo: {e}")
