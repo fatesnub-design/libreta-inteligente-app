@@ -77,28 +77,33 @@ def extraer_titulo_ocr(image_bytes):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     h, w = img.shape[:2]
     
-    # 2. Recortar solo la sección superior (donde va el campo "Nombre:")
-    # Tomamos el primer 15% superior de la imagen para evitar procesar toda la hoja en vano
-    recorte_superior = img[0:int(h * 0.15), 0:w]
+    # MODIFICACIÓN: Ampliamos el rango al 22% para asegurar que entre todo el renglón
+    recorte_superior = img[0:int(h * 0.22), 0:w]
     
-    # 3. Pasar el recorte al lector OCR
+    # 2. Pasar el recorte al lector OCR
     resultados = reader.readtext(recorte_superior)
     
     texto_detectado = ""
     for (bbox, texto, probabilidad) in resultados:
-        # Ignoramos la palabra "Nombre" si el OCR la lee impresa de la plantilla
-        if "nombre" not in texto.lower() and probabilidad > 0.35:
-            texto_detectado += " " + texto
-            
-    # 4. Limpieza básica del string para evitar caracteres prohibidos en nombres de archivos
-    texto_limpio = texto_detectado.strip()
-    texto_limpio = re.sub(r'[\\/*?:"<>|]', "", texto_limpio)
-    
-    # Nombre por defecto si el OCR no logra leer nada
-    if not texto_limpio:
-        texto_limpio = "Escaneo_Sin_Nombre"
+        # Hacemos la limpieza más inteligente para remover "Nombre" o "Nombre:" si aparecen
+        texto_limpio_bloque = re.sub(r'(?i)nombre\s*:?', '', texto)
         
-    return texto_limpio
+        # Bajamos ligeramente la probabilidad a 0.30 para que acepte trazos de lápiz más tenues
+        if probabilidad > 0.30 and len(texto_limpio_bloque.strip()) > 2:
+            texto_detectado += " " + texto_limpio_bloque
+            
+    # 3. Limpieza final de espacios y caracteres prohibidos
+    texto_final = texto_detectado.strip()
+    texto_final = re.sub(r'[\\/*?:"<>|]', "", texto_final)
+    
+    # Reemplazar múltiples espacios por uno solo
+    texto_final = " ".join(texto_final.split())
+    
+    # Si de verdad no leyó nada, dejamos el respaldo seguro
+    if not texto_final:
+        texto_final = "Escaneo_Sin_Nombre"
+        
+    return texto_final
 
 # --- Función del Filtro de Escaneo Universal ---
 def aplicar_filtro_escaneo(image_bytes):
